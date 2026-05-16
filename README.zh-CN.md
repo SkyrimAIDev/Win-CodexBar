@@ -24,13 +24,12 @@
 - **CLI** — `codexbar usage` 和 `codexbar cost`，便于脚本化和 CI
 - **WSL 支持** — CLI 开箱即用，桌面壳层通过 WSLg 运行
 
-## v0.26.2 更新内容
+## v0.26.3 更新内容
 
-- 新增可选 Floating Bar：一个置顶透明小条，不打开托盘面板也能查看服务商剩余额度。
-- 新增 Floating Bar 设置：方向、透明度、点击穿透覆盖模式，以及原生托盘菜单开关。
-- 修复 Settings 选项卡中的 Quit 按钮：现在它只关闭 Settings 窗口，并让 CodexBar 继续留在系统托盘中运行。
-- 托盘面板、弹出窗口和原生托盘菜单中的 Quit 仍会在你确实想停止 CodexBar 时退出整个应用。
-- 加固 Floating Bar 设置路径：服务商/设置变化时保持实时更新，并避免 Windows Tauri 创建窗口时的死锁风险。
+- 修复 DeepSeek 在桌面端配置 API Key 后刷新失败的问题。
+- API Key 类服务商现在会保持自动 API 数据源，不再错误回退到不支持的 CLI 模式。
+- 启动诊断日志不再把原始 CLI 参数值写入临时日志。
+- 启动日志改为每个进程单独文件，避免并发 CLI 运行时互相覆盖。
 
 ## 快速开始
 

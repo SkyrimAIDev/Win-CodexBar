@@ -24,13 +24,12 @@ The Windows port of [CodexBar](https://github.com/steipete/CodexBar) — a syste
 - **CLI** — `codexbar usage` and `codexbar cost` for scripting and CI
 - **WSL support** — CLI works out of the box; desktop shell via WSLg
 
-## What's New in v0.26.2
+## What's New in v0.26.3
 
-- Added an optional Floating Bar: an always-on-top transparent strip for watching provider capacity without opening the tray panel.
-- Added Floating Bar settings for orientation, opacity, click-through overlay mode, and native tray toggling.
-- Fixed the Settings tab's Quit button so it closes only the Settings window and leaves CodexBar running in the tray.
-- Tray panel, pop-out, and native tray menu Quit actions still exit the whole app when you actually want to stop CodexBar.
-- Hardened the Floating Bar settings path so it stays live across provider/settings changes and avoids Windows Tauri window-creation deadlocks.
+- Fixed DeepSeek refresh in the desktop app when an API key is configured.
+- API-key providers now stay on the automatic API source path instead of falling back to unsupported CLI mode.
+- Startup diagnostics no longer write raw CLI argument values to temp logs.
+- Launch logs now use per-process filenames so concurrent CLI runs do not overwrite each other.
 
 ## Quick Start
 

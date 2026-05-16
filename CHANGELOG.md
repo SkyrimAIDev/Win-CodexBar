@@ -4,6 +4,14 @@
 
 ---
 
+## [Windows] 0.26.3 - 2026-05-17
+
+### Fixed
+- Fix DeepSeek refresh in the desktop app when an API key is configured by keeping API-key providers on the automatic API source path instead of falling back to unsupported CLI mode.
+- Stop writing raw CLI argument values to startup diagnostics and use per-process launch log files to avoid leaking tokens or mixing concurrent launch logs.
+
+---
+
 ## [Windows] 0.26.2 - 2026-05-16
 
 ### Added
