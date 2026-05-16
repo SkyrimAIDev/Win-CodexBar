@@ -73,11 +73,11 @@ impl KimiK2Provider {
         None
     }
 
-    fn api_bases_from_region(region: Option<&str>) -> Vec<&'static str> {
+    fn api_bases_from_region(region: Option<&str>) -> &'static [&'static str] {
         match region.unwrap_or_default().trim().to_lowercase().as_str() {
-            "cn" | "china" => vec![KIMIK2_API_BASE_CHINA],
-            "global" | "international" | "intl" | "us" => vec![KIMIK2_API_BASE_INTERNATIONAL],
-            _ => vec![KIMIK2_API_BASE_INTERNATIONAL, KIMIK2_API_BASE_CHINA],
+            "cn" | "china" => &[KIMIK2_API_BASE_CHINA],
+            "global" | "international" | "intl" | "us" => &[KIMIK2_API_BASE_INTERNATIONAL],
+            _ => &[KIMIK2_API_BASE_INTERNATIONAL, KIMIK2_API_BASE_CHINA],
         }
     }
 
@@ -279,7 +279,7 @@ mod tests {
     fn kimi_api_region_default_tries_both_regions() {
         assert_eq!(
             KimiK2Provider::api_bases_from_region(None),
-            vec![
+            &[
                 super::KIMIK2_API_BASE_INTERNATIONAL,
                 super::KIMIK2_API_BASE_CHINA
             ]
@@ -290,7 +290,7 @@ mod tests {
     fn kimi_api_region_can_use_international_endpoint() {
         assert_eq!(
             KimiK2Provider::api_bases_from_region(Some("international")),
-            vec![super::KIMIK2_API_BASE_INTERNATIONAL]
+            &[super::KIMIK2_API_BASE_INTERNATIONAL]
         );
     }
 
@@ -298,7 +298,7 @@ mod tests {
     fn kimi_api_region_can_pin_china_endpoint() {
         assert_eq!(
             KimiK2Provider::api_bases_from_region(Some("china")),
-            vec![super::KIMIK2_API_BASE_CHINA]
+            &[super::KIMIK2_API_BASE_CHINA]
         );
     }
 }
