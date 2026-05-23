@@ -116,133 +116,206 @@ async fn do_refresh_providers_with_policy(
 ) -> Result<(), String> {
     let state = app.state::<Mutex<AppState>>();
 
-    {
-        let mut guard = state.lock().map_err(|e| e.to_string())?;
-        if guard.is_refreshing {
-            return Ok(());
-        }
-        if !force
-            && !guard.provider_cache.is_empty()
-            && is_provider_cache_fresh(guard.provider_cache_updated_at, PROVIDER_CACHE_STALE_AFTER)
-        {
-            return Ok(());
-        }
-        guard.is_refreshing = true;
-        guard.provider_refresh_started_at = Some(std::time::Instant::now());
+    if !begin_provider_refresh(&state, force)? {
+        return Ok(());
     }
 
     events::emit_refresh_started(app);
 
-    // Load settings and credential stores once, outside the hot loop.
-    let settings = Settings::load();
-    let enabled_ids = settings.get_enabled_provider_ids();
-    let manual_cookies = ManualCookies::load();
-    let api_keys = ApiKeys::load();
-    let token_accounts = TokenAccountStore::new().load().unwrap_or_else(|e| {
-        tracing::warn!("failed to load token accounts for provider refresh: {e}");
-        HashMap::new()
-    });
+    let inputs = ProviderRefreshInputs::load();
+    let enabled_count = inputs.enabled_ids.len();
 
-    // Spawn one task per enabled provider.
-    let mut handles = Vec::with_capacity(enabled_ids.len());
+    let handles = spawn_provider_refreshes(app, &inputs);
+    await_provider_refreshes(handles).await;
 
-    for id in &enabled_ids {
+    let error_count = finish_provider_refresh(&state)?;
+    update_tray_and_notifications(app, &state, &inputs.settings)?;
+
+    events::emit_refresh_complete(app, enabled_count, error_count);
+
+    Ok(())
+}
+
+fn begin_provider_refresh(
+    state: &tauri::State<'_, Mutex<AppState>>,
+    force: bool,
+) -> Result<bool, String> {
+    let mut guard = state.lock().map_err(|e| e.to_string())?;
+    if guard.is_refreshing {
+        return Ok(false);
+    }
+    if provider_cache_can_skip_refresh(&guard, force) {
+        return Ok(false);
+    }
+
+    guard.is_refreshing = true;
+    guard.provider_refresh_started_at = Some(std::time::Instant::now());
+    Ok(true)
+}
+
+fn provider_cache_can_skip_refresh(guard: &AppState, force: bool) -> bool {
+    !force
+        && !guard.provider_cache.is_empty()
+        && is_provider_cache_fresh(guard.provider_cache_updated_at, PROVIDER_CACHE_STALE_AFTER)
+}
+
+struct ProviderRefreshInputs {
+    settings: Settings,
+    enabled_ids: Vec<ProviderId>,
+    manual_cookies: ManualCookies,
+    api_keys: ApiKeys,
+    token_accounts: HashMap<ProviderId, ProviderAccountData>,
+}
+
+impl ProviderRefreshInputs {
+    fn load() -> Self {
+        let settings = Settings::load();
+        let enabled_ids = settings.get_enabled_provider_ids();
+        let manual_cookies = ManualCookies::load();
+        let api_keys = ApiKeys::load();
+        let token_accounts = TokenAccountStore::new().load().unwrap_or_else(|e| {
+            tracing::warn!("failed to load token accounts for provider refresh: {e}");
+            HashMap::new()
+        });
+
+        Self {
+            settings,
+            enabled_ids,
+            manual_cookies,
+            api_keys,
+            token_accounts,
+        }
+    }
+}
+
+fn spawn_provider_refreshes(
+    app: &tauri::AppHandle,
+    inputs: &ProviderRefreshInputs,
+) -> Vec<tokio::task::JoinHandle<()>> {
+    let mut handles = Vec::with_capacity(inputs.enabled_ids.len());
+
+    for id in &inputs.enabled_ids {
         let id = *id;
         let app_handle = app.clone();
-        let ctx = build_fetch_context(id, &settings, &manual_cookies, &api_keys, &token_accounts);
+        let ctx = build_fetch_context(
+            id,
+            &inputs.settings,
+            &inputs.manual_cookies,
+            &inputs.api_keys,
+            &inputs.token_accounts,
+        );
 
         handles.push(tokio::spawn(async move {
-            let provider = instantiate_provider(id);
-            let metadata = provider.metadata().clone();
-            let started = std::time::Instant::now();
-
-            let mut snapshot = match tokio::time::timeout(
-                PROVIDER_FETCH_TIMEOUT,
-                provider.fetch_usage(&ctx),
-            )
-            .await
-            {
-                Ok(Ok(result)) => ProviderUsageSnapshot::from_fetch_result(id, &metadata, &result),
-                Ok(Err(e)) => ProviderUsageSnapshot::from_error(
-                    id,
-                    &metadata,
-                    codexbar::logging::safe_error_message(e),
-                ),
-                Err(_) => ProviderUsageSnapshot::from_error(id, &metadata, "Timeout".to_string()),
-            };
-            let fetch_duration_ms = started.elapsed().as_millis();
-            snapshot.fetch_duration_ms = Some(fetch_duration_ms);
-            if fetch_duration_ms > 5_000 {
-                tracing::warn!(
-                    provider = id.cli_name(),
-                    fetch_duration_ms,
-                    "slow provider refresh"
-                );
-            }
-
-            // Emit per-provider update event.
-            events::emit_provider_updated(&app_handle, &snapshot);
-
-            // Append to the cache.
-            let st = app_handle.state::<Mutex<AppState>>();
-            if let Ok(mut guard) = st.lock() {
-                upsert_provider_cache(&mut guard.provider_cache, snapshot);
-            }
+            refresh_provider(app_handle, id, ctx).await;
         }));
     }
 
-    // Await all tasks.
+    handles
+}
+
+async fn refresh_provider(app: tauri::AppHandle, id: ProviderId, ctx: FetchContext) {
+    let snapshot = fetch_provider_snapshot(id, ctx).await;
+    events::emit_provider_updated(&app, &snapshot);
+
+    let state = app.state::<Mutex<AppState>>();
+    if let Ok(mut guard) = state.lock() {
+        upsert_provider_cache(&mut guard.provider_cache, snapshot);
+    }
+}
+
+async fn fetch_provider_snapshot(id: ProviderId, ctx: FetchContext) -> ProviderUsageSnapshot {
+    let provider = instantiate_provider(id);
+    let metadata = provider.metadata().clone();
+    let started = std::time::Instant::now();
+
+    let mut snapshot =
+        match tokio::time::timeout(PROVIDER_FETCH_TIMEOUT, provider.fetch_usage(&ctx)).await {
+            Ok(Ok(result)) => ProviderUsageSnapshot::from_fetch_result(id, &metadata, &result),
+            Ok(Err(e)) => ProviderUsageSnapshot::from_error(
+                id,
+                &metadata,
+                codexbar::logging::safe_error_message(e),
+            ),
+            Err(_) => ProviderUsageSnapshot::from_error(id, &metadata, "Timeout".to_string()),
+        };
+
+    record_provider_fetch_duration(id, &mut snapshot, started);
+    snapshot
+}
+
+fn record_provider_fetch_duration(
+    id: ProviderId,
+    snapshot: &mut ProviderUsageSnapshot,
+    started: std::time::Instant,
+) {
+    let fetch_duration_ms = started.elapsed().as_millis();
+    snapshot.fetch_duration_ms = Some(fetch_duration_ms);
+    if fetch_duration_ms > 5_000 {
+        tracing::warn!(
+            provider = id.cli_name(),
+            fetch_duration_ms,
+            "slow provider refresh"
+        );
+    }
+}
+
+async fn await_provider_refreshes(handles: Vec<tokio::task::JoinHandle<()>>) {
     for handle in handles {
         let _ = handle.await;
     }
+}
 
-    // Finalise.
-    let error_count = {
-        let mut guard = state.lock().map_err(|e| e.to_string())?;
-        guard.is_refreshing = false;
-        guard.provider_cache_updated_at = Some(std::time::Instant::now());
-        guard.provider_refresh_started_at = None;
-        guard
-            .provider_cache
-            .iter()
-            .filter(|s| s.error.is_some())
-            .count()
+fn finish_provider_refresh(state: &tauri::State<'_, Mutex<AppState>>) -> Result<usize, String> {
+    let mut guard = state.lock().map_err(|e| e.to_string())?;
+    guard.is_refreshing = false;
+    guard.provider_cache_updated_at = Some(std::time::Instant::now());
+    guard.provider_refresh_started_at = None;
+    Ok(guard
+        .provider_cache
+        .iter()
+        .filter(|s| s.error.is_some())
+        .count())
+}
+
+fn update_tray_and_notifications(
+    app: &tauri::AppHandle,
+    state: &tauri::State<'_, Mutex<AppState>>,
+    settings: &Settings,
+) -> Result<(), String> {
+    let cached = {
+        let guard = state.lock().map_err(|e| e.to_string())?;
+        guard.provider_cache.clone()
     };
+    crate::tray_bridge::update_tray_status_items(app, &cached);
+    crate::tray_bridge::update_tray_icon_and_tooltip(app, &cached);
+    notify_usage_thresholds(state, settings, &cached);
+    Ok(())
+}
 
-    // Update tray menu labels, icon, and tooltip once after the full refresh cycle.
-    {
-        let cached = {
-            let guard = state.lock().map_err(|e| e.to_string())?;
-            guard.provider_cache.clone()
-        };
-        crate::tray_bridge::update_tray_status_items(app, &cached);
-        crate::tray_bridge::update_tray_icon_and_tooltip(app, &cached);
-
-        // Fire OS notifications for any usage-threshold crossings.
-        let cli_map = codexbar::core::cli_name_map();
-        if let Ok(mut guard) = state.lock() {
-            for snapshot in &cached {
-                if snapshot.error.is_none()
-                    && let Some(&provider) = cli_map.get(snapshot.provider_id.as_str())
-                {
-                    guard.notification_manager.check_and_notify(
-                        provider,
-                        snapshot.primary.used_percent,
-                        &settings,
-                    );
-                    guard.notification_manager.check_session_transition(
-                        provider,
-                        snapshot.primary.used_percent,
-                        &settings,
-                    );
-                }
+fn notify_usage_thresholds(
+    state: &tauri::State<'_, Mutex<AppState>>,
+    settings: &Settings,
+    cached: &[ProviderUsageSnapshot],
+) {
+    let cli_map = codexbar::core::cli_name_map();
+    if let Ok(mut guard) = state.lock() {
+        for snapshot in cached {
+            if snapshot.error.is_none()
+                && let Some(&provider) = cli_map.get(snapshot.provider_id.as_str())
+            {
+                guard.notification_manager.check_and_notify(
+                    provider,
+                    snapshot.primary.used_percent,
+                    settings,
+                );
+                guard.notification_manager.check_session_transition(
+                    provider,
+                    snapshot.primary.used_percent,
+                    settings,
+                );
             }
         }
     }
-
-    events::emit_refresh_complete(app, enabled_ids.len(), error_count);
-
-    Ok(())
 }
 
 #[tauri::command]
