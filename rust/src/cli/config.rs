@@ -3,6 +3,8 @@
 //! Utilities for validating and inspecting configuration.
 
 use clap::{Parser, Subcommand};
+use serde::de::DeserializeOwned;
+use std::path::Path;
 
 use crate::core::{ProviderId, TokenAccountStore, instantiate_provider};
 use crate::settings::{ApiKeys, ManualCookies, Settings};
@@ -74,89 +76,130 @@ pub async fn run(args: ConfigArgs) -> anyhow::Result<()> {
 
 /// Validate configuration files
 async fn validate_config() -> anyhow::Result<()> {
-    let mut errors: Vec<String> = Vec::new();
-    let mut warnings: Vec<String> = Vec::new();
+    let mut report = ValidationReport::default();
+    validate_settings_config(&mut report);
+    validate_manual_cookies_config(&mut report);
+    validate_token_accounts_config(&mut report);
+    report.finish()
+}
 
-    // Check settings
+#[derive(Default)]
+struct ValidationReport {
+    errors: Vec<String>,
+    warnings: Vec<String>,
+}
+
+impl ValidationReport {
+    fn error(&mut self, message: impl Into<String>) {
+        self.errors.push(message.into());
+    }
+
+    fn warning(&mut self, message: impl Into<String>) {
+        self.warnings.push(message.into());
+    }
+
+    fn finish(self) -> anyhow::Result<()> {
+        print_validation_summary(&self.errors, &self.warnings)
+    }
+}
+
+fn validate_settings_config(report: &mut ValidationReport) {
     print!("Checking settings.json... ");
-    if let Some(path) = Settings::settings_path() {
-        if path.exists() {
-            match std::fs::read_to_string(&path) {
-                Ok(content) => match serde_json::from_str::<Settings>(&content) {
-                    Ok(_) => println!("OK"),
-                    Err(e) => {
-                        println!("INVALID");
-                        errors.push(format!("settings.json: {}", e));
-                    }
-                },
-                Err(e) => {
-                    println!("ERROR");
-                    errors.push(format!("settings.json: Could not read file: {}", e));
-                }
-            }
-        } else {
-            println!("NOT FOUND (using defaults)");
-            warnings.push("settings.json: File does not exist, using defaults".to_string());
-        }
-    } else {
+    let Some(path) = Settings::settings_path() else {
         println!("ERROR");
-        errors.push("settings.json: Could not determine config path".to_string());
+        report.error("settings.json: Could not determine config path");
+        return;
+    };
+
+    if validate_optional_json_file::<Settings>(&path, "settings.json", report) {
+        return;
     }
 
-    // Check manual cookies
+    println!("NOT FOUND (using defaults)");
+    report.warning("settings.json: File does not exist, using defaults");
+}
+
+fn validate_manual_cookies_config(report: &mut ValidationReport) {
     print!("Checking manual_cookies.json... ");
-    if let Some(path) = ManualCookies::cookies_path() {
-        if path.exists() {
-            match std::fs::read_to_string(&path) {
-                Ok(content) => match serde_json::from_str::<ManualCookies>(&content) {
-                    Ok(_) => println!("OK"),
-                    Err(e) => {
-                        println!("INVALID");
-                        errors.push(format!("manual_cookies.json: {}", e));
-                    }
-                },
-                Err(e) => {
-                    println!("ERROR");
-                    errors.push(format!("manual_cookies.json: Could not read file: {}", e));
-                }
-            }
-        } else {
-            println!("NOT FOUND (none configured)");
-        }
-    } else {
+    let Some(path) = ManualCookies::cookies_path() else {
         println!("SKIP");
-    }
+        return;
+    };
 
-    // Check token accounts
-    print!("Checking token-accounts.json... ");
-    let store = TokenAccountStore::new();
-    let path = TokenAccountStore::default_path();
-    if path.exists() {
-        match store.load() {
-            Ok(_) => println!("OK"),
-            Err(e) => {
-                println!("INVALID");
-                errors.push(format!("token-accounts.json: {}", e));
-            }
-        }
-    } else {
+    if !validate_optional_json_file::<ManualCookies>(&path, "manual_cookies.json", report) {
         println!("NOT FOUND (none configured)");
     }
+}
 
-    // Print summary
+fn validate_optional_json_file<T>(path: &Path, label: &str, report: &mut ValidationReport) -> bool
+where
+    T: DeserializeOwned,
+{
+    if !path.exists() {
+        return false;
+    }
+
+    match read_json_config::<T>(path) {
+        Ok(()) => println!("OK"),
+        Err(ConfigFileError::Read(e)) => {
+            println!("ERROR");
+            report.error(format!("{label}: Could not read file: {e}"));
+        }
+        Err(ConfigFileError::Parse(e)) => {
+            println!("INVALID");
+            report.error(format!("{label}: {e}"));
+        }
+    }
+
+    true
+}
+
+fn read_json_config<T>(path: &Path) -> Result<(), ConfigFileError>
+where
+    T: DeserializeOwned,
+{
+    let content = std::fs::read_to_string(path).map_err(ConfigFileError::Read)?;
+    serde_json::from_str::<T>(&content)
+        .map(|_| ())
+        .map_err(ConfigFileError::Parse)
+}
+
+enum ConfigFileError {
+    Read(std::io::Error),
+    Parse(serde_json::Error),
+}
+
+fn validate_token_accounts_config(report: &mut ValidationReport) {
+    print!("Checking token-accounts.json... ");
+    let path = TokenAccountStore::default_path();
+    if !path.exists() {
+        println!("NOT FOUND (none configured)");
+        return;
+    }
+
+    match TokenAccountStore::new().load() {
+        Ok(_) => println!("OK"),
+        Err(e) => {
+            println!("INVALID");
+            report.error(format!("token-accounts.json: {e}"));
+        }
+    }
+}
+
+fn print_validation_summary(errors: &[String], warnings: &[String]) -> anyhow::Result<()> {
     println!();
     if errors.is_empty() && warnings.is_empty() {
         println!("Configuration is valid.");
     } else {
         if !warnings.is_empty() {
             println!("Warnings:");
-            for w in &warnings {
+            for w in warnings {
                 println!("  - {}", w);
             }
         }
         if !errors.is_empty() {
             println!("Errors:");
-            for e in &errors {
+            for e in errors {
                 println!("  - {}", e);
             }
             anyhow::bail!(
