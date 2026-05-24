@@ -20,13 +20,22 @@ import { DEMO_ENABLED, DEMO_PROVIDERS } from "../lib/demoProviders";
 
 /** Provider IDs that have a dashboard URL in the backend */
 const HAS_DASHBOARD = new Set([
-  "codex", "claude", "copilot", "cursor", "gemini", "antigravity",
-  "factory", "augment", "kilo", "amp", "openrouter", "warp", "zai",
-  "minimax", "kiro", "opencode",
+  "abacus", "alibaba", "alibabatokenplan", "amp", "augment",
+  "azureopenai", "bedrock", "claude", "codex", "codebuff",
+  "commandcode", "copilot", "crof", "cursor", "deepgram", "deepseek",
+  "doubao", "elevenlabs", "factory", "gemini", "grok", "groq",
+  "infini", "jetbrains", "kilo", "kimi", "kimik2", "kiro", "manus",
+  "mimo", "minimax", "mistral", "nanogpt", "ollama", "openaiapi",
+  "opencode", "opencodego", "openrouter", "perplexity", "stepfun",
+  "synthetic", "t3chat", "venice", "vertexai", "warp", "windsurf",
+  "zai",
 ]);
 /** Provider IDs that have a status page URL in the backend */
 const HAS_STATUS_PAGE = new Set([
-  "codex", "claude", "copilot", "cursor", "gemini",
+  "alibabatokenplan", "amp", "augment", "azureopenai", "bedrock",
+  "claude", "codex", "copilot", "deepgram", "deepseek", "elevenlabs",
+  "gemini", "grok", "groq", "kiro", "mistral", "openaiapi",
+  "openrouter", "vertexai", "windsurf",
 ]);
 
 function getProviderStatus(

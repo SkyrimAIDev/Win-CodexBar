@@ -203,9 +203,9 @@ pub fn activate(app: &AppHandle) {
     let Some(config) = config else { return };
     let target = config.surface_mode();
     let position = match target {
-        // Settings windows are larger than tray panels. Let the normal Settings
-        // positioning path center/clamp them instead of reusing tray coordinates.
-        SurfaceMode::Settings => None,
+        // Detached surfaces are larger than tray panels. Let their normal
+        // positioning paths center/clamp them instead of reusing tray coords.
+        SurfaceMode::Settings | SurfaceMode::PopOut => None,
         _ => proof_window_position(app),
     };
     tracing::info!(
