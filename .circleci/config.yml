@@ -90,14 +90,16 @@ jobs:
               }
               & powershell.exe @args | Out-Host
               if ($LASTEXITCODE -ne 0) {
-                Write-Error "circleci-release.ps1 failed with exit code $LASTEXITCODE"
+                Write-Host "circleci-release.ps1 failed with exit code $LASTEXITCODE"
                 $success = $false
               }
             } catch {
-              Write-Error $_
+              Write-Host $_
               $success = $false
             }
-            $success
+            if (-not $success) {
+              exit 1
+            }
 
       - run:
           name: Assert release artifacts
@@ -120,17 +122,19 @@ jobs:
               )) {
                 $path = Join-Path $assetsDir $name
                 if (-not (Test-Path -LiteralPath $path)) {
-                  Write-Error "Missing release artifact: $path"
+                  Write-Host "Missing release artifact: $path"
                   $success = $false
                 } else {
                   Write-Host "Found $path"
                 }
               }
             } catch {
-              Write-Error $_
+              Write-Host $_
               $success = $false
             }
-            $success
+            if (-not $success) {
+              exit 1
+            }
 
       - store_artifacts:
           path: C:/code/Win-CodexBar-release/assets
