@@ -165,8 +165,14 @@ try {
     }
     if ($env:CARGO_BUILD_TARGET -and $rustup) {
         $toolchain = if ($env:RUSTUP_TOOLCHAIN) { $env:RUSTUP_TOOLCHAIN } else { "stable-x86_64-pc-windows-msvc" }
-        Invoke-Native $rustup.Source @("toolchain", "install", $toolchain, "--profile", "minimal")
-        Invoke-Native $rustup.Source @("target", "add", $env:CARGO_BUILD_TARGET, "--toolchain", $toolchain)
+        & $rustup.Source toolchain install $toolchain --profile minimal
+        if ($LASTEXITCODE -ne 0) {
+            throw "$($rustup.Source) toolchain install exited with code $LASTEXITCODE"
+        }
+        & $rustup.Source target add $env:CARGO_BUILD_TARGET --toolchain $toolchain
+        if ($LASTEXITCODE -ne 0) {
+            throw "$($rustup.Source) target add exited with code $LASTEXITCODE"
+        }
         $env:RUSTUP_TOOLCHAIN = $toolchain
     }
     $env:PNPM_HOME = if ($env:PNPM_HOME) { $env:PNPM_HOME } else { Join-Path $CacheDir "pnpm-home" }

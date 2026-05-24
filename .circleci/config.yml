@@ -77,59 +77,38 @@ jobs:
 
       - run:
           name: Build and smoke test Windows release
-          shell: powershell.exe
+          shell: bash.exe
           no_output_timeout: 30m
           command: |
-            try {
-              $ErrorActionPreference = "Stop"
-              $env:CARGO_BUILD_TARGET = "x86_64-pc-windows-msvc"
-              $env:RUSTUP_TOOLCHAIN = "stable-x86_64-pc-windows-msvc"
-              $uploadCloudflare = [System.Boolean]::Parse("<< parameters.upload_cloudflare >>")
-              $args = @("-NoLogo", "-ExecutionPolicy", "Bypass", "-File", "scripts\ci\circleci-release.ps1")
-              if ($uploadCloudflare) {
-                $args += "-UploadCloudflare"
-              }
-              powershell.exe @args
-              if ($LASTEXITCODE -ne 0) {
-                Write-Error "circleci-release.ps1 failed with exit code $LASTEXITCODE"
-                [Environment]::Exit($LASTEXITCODE)
-              }
-            } catch {
-              Write-Error $_
-              [Environment]::Exit(1)
-            }
+            set -euo pipefail
+            export CARGO_BUILD_TARGET=x86_64-pc-windows-msvc
+            export RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-msvc
+            args=()
+            if [ "<< parameters.upload_cloudflare >>" = "true" ]; then
+              args+=("-UploadCloudflare")
+            fi
+            powershell.exe -NoLogo -ExecutionPolicy Bypass -File scripts/ci/circleci-release.ps1 "${args[@]}"
 
       - run:
           name: Assert release artifacts
-          shell: powershell.exe
+          shell: bash.exe
           command: |
-            try {
-              $ErrorActionPreference = "Stop"
-              $versionLine = Get-Content rust\Cargo.toml | Where-Object { $_ -match '^version = "([^"]+)"' } | Select-Object -First 1
-              if ($versionLine -notmatch '^version = "([^"]+)"') {
-                throw "Failed to determine version from rust\Cargo.toml"
-              }
-              $version = $Matches[1]
-              $assetsDir = "C:\code\Win-CodexBar-release\assets"
-              foreach ($name in @(
-                "CodexBar-$version-Setup.exe",
-                "CodexBar-$version-Setup.exe.sha256",
-                "CodexBar-$version-portable.exe",
-                "CodexBar-$version-portable.exe.sha256"
-              )) {
-                $path = Join-Path $assetsDir $name
-                if (-not (Test-Path -LiteralPath $path)) {
-                  throw "Missing release artifact: $path"
-                }
-                Write-Host "Found $path"
-              }
-            } catch {
-              Write-Error $_
-              [Environment]::Exit(1)
-            }
+            set -euo pipefail
+            version="$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -n 1)"
+            test -n "$version"
+            assets_dir="C:/code/Win-CodexBar-release/assets"
+            for name in \
+              "CodexBar-$version-Setup.exe" \
+              "CodexBar-$version-Setup.exe.sha256" \
+              "CodexBar-$version-portable.exe" \
+              "CodexBar-$version-portable.exe.sha256"; do
+              path="$assets_dir/$name"
+              test -f "$path"
+              echo "Found $path"
+            done
 
       - store_artifacts:
-          path: C:\code\Win-CodexBar-release\assets
+          path: C:/code/Win-CodexBar-release/assets
           destination: win-codexbar-release-assets
 
 workflows:
