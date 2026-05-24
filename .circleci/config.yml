@@ -10,11 +10,17 @@ parameters:
   upload_cloudflare:
     type: boolean
     default: false
+  full_windows_release:
+    type: boolean
+    default: false
 
 jobs:
   windows-release:
     parameters:
       upload_cloudflare:
+        type: boolean
+        default: false
+      full_release:
         type: boolean
         default: false
     executor:
@@ -31,16 +37,27 @@ jobs:
           shell: cmd.exe
           command: scripts\ci\install-circleci-release-tools.cmd
 
-      - run:
-          name: Build and smoke test Windows release
-          shell: cmd.exe
-          no_output_timeout: 30m
-          command: scripts\ci\circleci-release.cmd
+      - restore_cache:
+          keys:
+            - win-release-v1-{{ checksum "apps/desktop-tauri/pnpm-lock.yaml" }}-{{ checksum "rust/Cargo.lock" }}
+            - win-release-v1-{{ checksum "apps/desktop-tauri/pnpm-lock.yaml" }}-
+            - win-release-v1-
 
       - run:
-          name: Assert release artifacts
+          name: Build Windows release
           shell: cmd.exe
-          command: scripts\ci\assert-release-assets.cmd
+          no_output_timeout: 30m
+          command: set "FULL_WINDOWS_RELEASE=<< parameters.full_release >>" && set "UPLOAD_CLOUDFLARE=<< parameters.upload_cloudflare >>" && scripts\ci\circleci-release.cmd
+
+      - run:
+          name: Assert Windows build output
+          shell: cmd.exe
+          command: if "<< parameters.full_release >>"=="true" (scripts\ci\assert-release-assets.cmd) else (scripts\ci\assert-warm-build.cmd)
+
+      - save_cache:
+          key: win-release-v1-{{ checksum "apps/desktop-tauri/pnpm-lock.yaml" }}-{{ checksum "rust/Cargo.lock" }}-{{ epoch }}
+          paths:
+            - C:/code/Win-CodexBar-release/cache
 
       - store_artifacts:
           path: C:/code/Win-CodexBar-release/assets
@@ -52,6 +69,7 @@ workflows:
       - windows-release:
           name: windows-release-tag
           upload_cloudflare: true
+          full_release: true
           filters:
             tags:
               only: /^v.*/
@@ -64,3 +82,4 @@ workflows:
       - windows-release:
           name: windows-release-manual
           upload_cloudflare: << pipeline.parameters.upload_cloudflare >>
+          full_release: << pipeline.parameters.full_windows_release >>

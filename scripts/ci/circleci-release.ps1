@@ -2,7 +2,9 @@
 
 param(
     [string]$Ref = "",
-    [switch]$UploadCloudflare
+    [switch]$UploadCloudflare,
+    [switch]$WarmCacheOnly,
+    [switch]$SmokeInstall
 )
 
 Set-StrictMode -Version Latest
@@ -31,7 +33,14 @@ try {
         [Environment]::Exit($LASTEXITCODE)
     }
 
-    & powershell.exe -NoLogo -ExecutionPolicy Bypass -File "scripts\windows-release-build.ps1" -Ref $Ref -WorkRoot $WorkRoot -SmokeInstall
+    $releaseBuildArgs = @("-NoLogo", "-ExecutionPolicy", "Bypass", "-File", "scripts\windows-release-build.ps1", "-Ref", $Ref, "-WorkRoot", $WorkRoot)
+    if ($WarmCacheOnly) {
+        $releaseBuildArgs += "-WarmCacheOnly"
+    }
+    if ($SmokeInstall) {
+        $releaseBuildArgs += "-SmokeInstall"
+    }
+    & powershell.exe @releaseBuildArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Host "windows-release-build.ps1 failed with exit code $LASTEXITCODE"
         [Environment]::Exit($LASTEXITCODE)
@@ -47,12 +56,14 @@ $line = Get-Content rust\Cargo.toml | Where-Object { $_ -match '^version = "([^"
 if ($line -match '^version = "([^"]+)"') { $Matches[1] }
 '@).Trim()
 
-    if ($UploadCloudflare) {
+    if ($UploadCloudflare -and -not $WarmCacheOnly) {
         & powershell.exe -NoLogo -ExecutionPolicy Bypass -File "scripts\ci\upload-cloudflare-r2.ps1" -Version $version -AssetsDir $AssetsDir
         if ($LASTEXITCODE -ne 0) {
             Write-Host "upload-cloudflare-r2.ps1 failed with exit code $LASTEXITCODE"
             [Environment]::Exit($LASTEXITCODE)
         }
+    } elseif ($UploadCloudflare -and $WarmCacheOnly) {
+        Write-Host "Cloudflare R2 upload skipped for warm-cache-only build."
     } else {
         Write-Host "Cloudflare R2 upload skipped. Pass -UploadCloudflare to enable it."
     }

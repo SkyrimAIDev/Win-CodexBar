@@ -301,7 +301,10 @@ try {
     }
 
     if ($WarmCacheOnly) {
+        $warmExe = Join-Path $AssetsDir "CodexBar-$version-warm.exe"
+        Copy-Item $releaseExe $warmExe -Force
         Write-Host ""
+        Write-Host "Warm build artifact: $warmExe"
         Write-Host "Warm cache completed. Skipping installer packaging because -WarmCacheOnly was supplied."
         return
     }
