@@ -33,14 +33,14 @@ jobs:
 
       - run:
           name: Build and smoke test Windows release
-          shell: powershell.exe
+          shell: pwsh.exe -NoLogo -ExecutionPolicy Bypass
           no_output_timeout: 30m
-          command: $env:CARGO_BUILD_TARGET = "x86_64-pc-windows-msvc"; $(powershell.exe -NoLogo -ExecutionPolicy Bypass -File scripts\ci\circleci-release.ps1 | Out-Host; $LASTEXITCODE -eq 0)
+          command: $env:CARGO_BUILD_TARGET = "x86_64-pc-windows-msvc"; .\scripts\ci\circleci-release.ps1
 
       - run:
           name: Assert release artifacts
-          shell: powershell.exe
-          command: $(powershell.exe -NoLogo -ExecutionPolicy Bypass -File scripts\ci\assert-release-assets.ps1 | Out-Host; $LASTEXITCODE -eq 0)
+          shell: pwsh.exe -NoLogo -ExecutionPolicy Bypass
+          command: .\scripts\ci\assert-release-assets.ps1
 
       - store_artifacts:
           path: C:/code/Win-CodexBar-release/assets

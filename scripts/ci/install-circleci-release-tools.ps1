@@ -8,7 +8,7 @@ trap {
 }
 
 choco feature enable -n allowGlobalConfirmation
-choco install git gh innosetup nodejs-lts -y --no-progress
+choco install git gh innosetup nodejs-lts powershell-core -y --no-progress
 
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
     [System.Environment]::GetEnvironmentVariable("Path", "User")
@@ -62,6 +62,7 @@ gh --version
 cargo --version
 rustc --version
 pnpm --version
+pwsh --version
 
 $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
 if (-not (Test-Path $iscc)) {
