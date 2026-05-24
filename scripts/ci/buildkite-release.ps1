@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 trap {
     Write-Error $_
-    exit 1
+    [Environment]::Exit(1)
 }
 
 if (-not $env:BUILDKITE_TAG) {

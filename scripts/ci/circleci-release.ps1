@@ -9,7 +9,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 trap {
     Write-Error $_
-    exit 1
+    [Environment]::Exit(1)
 }
 
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
