@@ -202,7 +202,12 @@ pub fn activate(app: &AppHandle) {
 
     let Some(config) = config else { return };
     let target = config.surface_mode();
-    let position = proof_window_position(app);
+    let position = match target {
+        // Settings windows are larger than tray panels. Let the normal Settings
+        // positioning path center/clamp them instead of reusing tray coordinates.
+        SurfaceMode::Settings => None,
+        _ => proof_window_position(app),
+    };
     tracing::info!(
         "proof-harness: activating surface={} tab={:?} position={:?}",
         config.target_surface,
