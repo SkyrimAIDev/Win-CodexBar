@@ -323,7 +323,11 @@ export default function TrayPanel({ state }: { state: BootstrapState }) {
       banner={banner}
       footerRows={footerRows}
     >
-      <div className="provider-grid">
+      <div
+        className={`provider-grid${
+          providers.length + 1 <= 6 ? " provider-grid--sparse" : ""
+        }`}
+      >
         {/* Overview button — first item like macOS */}
         <button
           type="button"

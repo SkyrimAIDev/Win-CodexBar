@@ -3075,6 +3075,20 @@ html:has(.menu-surface--tray) {
   grid-template-columns: repeat(13, minmax(0, 1fr));
   gap: 9px 3px;
 }
+
+.menu-surface--tray .provider-grid--sparse {
+  grid-template-columns: repeat(auto-fit, 44px);
+  justify-content: start;
+  gap: 8px 8px;
+}
+
+.menu-surface--tray .provider-grid--sparse .provider-grid__item {
+  width: 44px;
+}
+
+.menu-surface--tray .provider-grid--sparse .provider-grid__label {
+  max-width: 42px;
+}
 /* Divider between provider grid and card stack */
 .menu-surface--tray .provider-grid__divider {
   height: 1px;
