@@ -43,45 +43,29 @@ function Install-MinimalRustupToolchain {
     Write-Host "Ensuring minimal Rust MSVC toolchain..."
 
     if (-not (Test-Command "rustup")) {
-        $rustupInit = Join-Path $env:TEMP "rustup-init.exe"
-        $rustupUrl = "https://static.rust-lang.org/rustup/archive/1.27.1/x86_64-pc-windows-msvc/rustup-init.exe"
-        Write-Host "Downloading rustup-init from $rustupUrl"
-        if (Test-Command "Start-FileDownload") {
-            Start-FileDownload $rustupUrl -FileName $rustupInit
-        } else {
-            curl.exe --connect-timeout 30 --max-time 120 -fsSL $rustupUrl -o $rustupInit
-            if ($LASTEXITCODE -ne 0) {
-                throw "rustup-init download failed with exit code $LASTEXITCODE"
-            }
-        }
-
-        if (-not (Test-Path $rustupInit)) {
-            throw "rustup-init download did not create $rustupInit"
-        }
-
-        Write-Host "Installing stable-x86_64-pc-windows-msvc with minimal profile..."
-        & $rustupInit -y --no-modify-path --profile minimal --default-toolchain stable-x86_64-pc-windows-msvc
+        Write-Host "Installing rustup through Chocolatey..."
+        choco install rustup.install --version=1.27.1 -y --no-progress
         if ($LASTEXITCODE -ne 0) {
-            throw "rustup-init failed with exit code $LASTEXITCODE"
+            throw "rustup.install failed with exit code $LASTEXITCODE"
         }
 
         Add-CargoPath
-    } else {
-        Write-Host "rustup found; installing/updating minimal stable MSVC toolchain..."
-        rustup set profile minimal
-        if ($LASTEXITCODE -ne 0) {
-            throw "rustup set profile failed with exit code $LASTEXITCODE"
-        }
+    }
 
-        rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal --no-self-update
-        if ($LASTEXITCODE -ne 0) {
-            throw "rustup toolchain install failed with exit code $LASTEXITCODE"
-        }
+    Write-Host "Installing/updating minimal stable MSVC toolchain..."
+    rustup set profile minimal
+    if ($LASTEXITCODE -ne 0) {
+        throw "rustup set profile failed with exit code $LASTEXITCODE"
+    }
 
-        rustup default stable-x86_64-pc-windows-msvc
-        if ($LASTEXITCODE -ne 0) {
-            throw "rustup default failed with exit code $LASTEXITCODE"
-        }
+    rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal --no-self-update
+    if ($LASTEXITCODE -ne 0) {
+        throw "rustup toolchain install failed with exit code $LASTEXITCODE"
+    }
+
+    rustup default stable-x86_64-pc-windows-msvc
+    if ($LASTEXITCODE -ne 0) {
+        throw "rustup default failed with exit code $LASTEXITCODE"
     }
 }
 
