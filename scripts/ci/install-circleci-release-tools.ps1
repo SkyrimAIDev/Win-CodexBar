@@ -44,7 +44,7 @@ function Install-MinimalRustupToolchain {
 
     if (-not (Test-Command "rustup")) {
         $rustupInit = Join-Path $env:TEMP "rustup-init.exe"
-        $rustupUrl = "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe"
+        $rustupUrl = "https://static.rust-lang.org/rustup/archive/1.27.1/x86_64-pc-windows-msvc/rustup-init.exe"
         Write-Host "Downloading rustup-init from $rustupUrl"
         if (Test-Command "Start-FileDownload") {
             Start-FileDownload $rustupUrl -FileName $rustupInit
