@@ -7,7 +7,7 @@ use super::{
 use crate::surface::SurfaceMode;
 use crate::surface_target::SurfaceTarget;
 use codexbar::core::{
-    ProviderAccountData, ProviderFetchResult, ProviderId, SourceMode, TokenAccount,
+    FetchContext, ProviderAccountData, ProviderFetchResult, ProviderId, SourceMode, TokenAccount,
     instantiate_provider,
 };
 use codexbar::host::session::launch_block_reason;
@@ -582,6 +582,51 @@ fn provider_cache_is_stale_after_window() {
 }
 
 #[test]
+fn provider_fetch_timeout_allows_slower_authenticated_providers() {
+    let ctx = FetchContext {
+        web_timeout: 30,
+        ..FetchContext::default()
+    };
+    assert_eq!(
+        super::provider_fetch_timeout(ProviderId::Claude, &ctx),
+        std::time::Duration::from_secs(75)
+    );
+    assert_eq!(
+        super::provider_fetch_timeout(ProviderId::Codex, &ctx),
+        std::time::Duration::from_secs(75)
+    );
+    assert_eq!(
+        super::provider_fetch_timeout(ProviderId::Copilot, &ctx),
+        std::time::Duration::from_secs(75)
+    );
+    assert_eq!(
+        super::provider_fetch_timeout(ProviderId::DeepSeek, &ctx),
+        std::time::Duration::from_secs(35)
+    );
+}
+
+#[test]
+fn provider_fetch_timeout_respects_context_web_timeout_with_cap() {
+    let ctx = FetchContext {
+        web_timeout: 60,
+        ..FetchContext::default()
+    };
+    assert_eq!(
+        super::provider_fetch_timeout(ProviderId::T3Chat, &ctx),
+        std::time::Duration::from_secs(65)
+    );
+
+    let ctx = FetchContext {
+        web_timeout: 120,
+        ..FetchContext::default()
+    };
+    assert_eq!(
+        super::provider_fetch_timeout(ProviderId::AzureOpenAI, &ctx),
+        std::time::Duration::from_secs(65)
+    );
+}
+
+#[test]
 fn provider_cache_upsert_replaces_existing_provider() {
     let metadata = instantiate_provider(ProviderId::Codex).metadata().clone();
     let result = ProviderFetchResult {
@@ -600,6 +645,44 @@ fn provider_cache_upsert_replaces_existing_provider() {
     assert_eq!(cache.len(), 1);
     assert_eq!(cache[0].provider_id, "codex");
     assert_eq!(cache[0].error.as_deref(), Some("new"));
+}
+
+#[test]
+fn claude_error_message_removes_upstream_swift_cancellation() {
+    let message = super::friendly_provider_error(
+        ProviderId::Claude,
+        "The operation couldn't be completed. (Swift.CancellationError error 1.)",
+    );
+
+    assert!(!message.contains("Swift"));
+    assert!(message.contains("Claude usage fetch was cancelled"));
+    assert!(message.contains("Refresh Claude"));
+}
+
+#[test]
+fn claude_error_message_explains_missing_sign_in() {
+    let message = super::friendly_provider_error(
+        ProviderId::Claude,
+        "OAuth error: Claude OAuth credentials not found. Run `claude` to authenticate.",
+    );
+
+    assert_eq!(
+        message,
+        "Claude sign-in was not found. Run `claude` once to authenticate, then refresh Claude in Win-CodexBar."
+    );
+}
+
+#[test]
+fn non_claude_error_message_is_preserved() {
+    let message = super::friendly_provider_error(
+        ProviderId::Codex,
+        "OAuth error: Claude OAuth credentials not found. Run `claude` to authenticate.",
+    );
+
+    assert_eq!(
+        message,
+        "OAuth error: Claude OAuth credentials not found. Run `claude` to authenticate."
+    );
 }
 
 #[test]
