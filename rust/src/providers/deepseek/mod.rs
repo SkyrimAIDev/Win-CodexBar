@@ -256,12 +256,7 @@ impl DeepSeekProvider {
     }
 
     fn snapshot_from_balance(balance: BalanceResponse) -> UsageSnapshot {
-        let selected = balance
-            .balance_infos
-            .iter()
-            .find(|info| info.currency.eq_ignore_ascii_case("USD"))
-            .cloned()
-            .or_else(|| balance.balance_infos.first().cloned());
+        let selected = select_balance_info(&balance.balance_infos).cloned();
 
         let Some(info) = selected else {
             let mut window = RateWindow::new(100.0);
@@ -458,6 +453,25 @@ fn parse_money(value: &str) -> f64 {
     value.parse::<f64>().unwrap_or(0.0)
 }
 
+fn select_balance_info(balance_infos: &[BalanceInfo]) -> Option<&BalanceInfo> {
+    balance_infos
+        .iter()
+        .find(|info| {
+            info.currency.eq_ignore_ascii_case("USD") && parse_money(&info.total_balance) > 0.0
+        })
+        .or_else(|| {
+            balance_infos
+                .iter()
+                .find(|info| parse_money(&info.total_balance) > 0.0)
+        })
+        .or_else(|| {
+            balance_infos
+                .iter()
+                .find(|info| info.currency.eq_ignore_ascii_case("USD"))
+        })
+        .or_else(|| balance_infos.first())
+}
+
 fn validate_usage_envelope<T>(
     envelope: &UsageEnvelope<T>,
     label: &str,
@@ -620,6 +634,65 @@ mod tests {
             snapshot.primary.reset_description.as_deref(),
             Some("$3.50 (Paid: $3.00 / Granted: $0.50)")
         );
+    }
+
+    #[test]
+    fn uses_cny_balance_when_usd_is_empty() {
+        let snapshot = DeepSeekProvider::snapshot_from_balance(BalanceResponse {
+            is_available: true,
+            balance_infos: vec![
+                BalanceInfo {
+                    currency: "USD".into(),
+                    total_balance: "0".into(),
+                    granted_balance: "0".into(),
+                    topped_up_balance: "0".into(),
+                },
+                BalanceInfo {
+                    currency: "CNY".into(),
+                    total_balance: "42.25".into(),
+                    granted_balance: "2.25".into(),
+                    topped_up_balance: "40".into(),
+                },
+            ],
+        });
+
+        assert_eq!(snapshot.primary.used_percent, 0.0);
+        assert_eq!(
+            snapshot.primary.reset_description.as_deref(),
+            Some("¥42.25 (Paid: ¥40.00 / Granted: ¥2.25)")
+        );
+        assert_eq!(
+            snapshot.login_method.as_deref(),
+            Some("CNY balance: ¥42.25")
+        );
+    }
+
+    #[test]
+    fn keeps_zero_usd_when_no_currency_has_balance() {
+        let snapshot = DeepSeekProvider::snapshot_from_balance(BalanceResponse {
+            is_available: true,
+            balance_infos: vec![
+                BalanceInfo {
+                    currency: "CNY".into(),
+                    total_balance: "0".into(),
+                    granted_balance: "0".into(),
+                    topped_up_balance: "0".into(),
+                },
+                BalanceInfo {
+                    currency: "USD".into(),
+                    total_balance: "0".into(),
+                    granted_balance: "0".into(),
+                    topped_up_balance: "0".into(),
+                },
+            ],
+        });
+
+        assert_eq!(snapshot.primary.used_percent, 100.0);
+        assert_eq!(
+            snapshot.primary.reset_description.as_deref(),
+            Some("$0.00 — add credits at platform.deepseek.com")
+        );
+        assert_eq!(snapshot.login_method.as_deref(), Some("USD balance: $0.00"));
     }
 
     #[test]
