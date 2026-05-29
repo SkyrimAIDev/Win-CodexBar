@@ -24,13 +24,13 @@
 - **CLI** — `codexbar usage`、`codexbar cost`、`codexbar config` 和本机回环 `codexbar serve`，便于脚本化、本地集成和 CI
 - **WSL 支持** — CLI 开箱即用，桌面壳层通过 WSLg 运行
 
-## v0.30.4 更新内容
+## v0.31.0 更新内容
 
-- 将上游 CodexBar v0.30.1 的安全与稳定性修复移植到 Win-CodexBar。
-- 新增 `codexbar diagnose`，可导出安全 JSON 诊断信息，报告服务商 source/config/fetch 状态，但不会暴露 Cookie、Token、邮箱或原始密钥。
-- 改进 Claude OAuth HTTP 429 处理：后台重试会退避，同时保留已有 Claude 凭据。
-- Providers 设置侧栏增加尾部留白，避免行尾控件贴近滚动条。
-- 上游 macOS status item 重建修复属于 AppKit 专用逻辑；Windows Tauri 托盘路径没有对应的 status item 重建循环。
+- 将上游 CodexBar v0.31.0 的 provider 行为修复移植到 Win-CodexBar。
+- AWS Bedrock 现在支持通过命名 AWS CLI profile 获取用量，包括 AWS CLI 可解析的 SSO / assume-role profile。
+- 当 Codex 用量接口返回 Spark 专属限制时，会显示 Codex Spark 5 小时与每周 quota。
+- 隐藏 Claude 已废弃的 Design quota，同时保留其他 Claude 用量窗口。
+- 本地 Codex/Claude 图表扫描支持取消，连续刷新时会更快停止过期 JSONL 扫描。
 
 ## v0.30.3 更新内容
 
@@ -99,7 +99,7 @@ Winget 分发已通过 [microsoft/winget-pkgs](https://github.com/microsoft/wing
 在 Windows 构建服务器上做本地发布构建时，使用缓存版构建脚本：
 
 ```powershell
-.\scripts\windows-release-build.ps1 -Ref v0.30.4
+.\scripts\windows-release-build.ps1 -Ref v0.31.0
 ```
 
 脚本会在 `C:\code\Win-CodexBar-release\source` 维护干净源码签出，在 `C:\code\Win-CodexBar-release\cache\cargo-target` 复用 Rust 构建输出，在 `C:\code\Win-CodexBar-release\cache\pnpm-store` 复用 pnpm 包，并复用已签名的 WebView2/VC++ 引导程序下载。它仍会构建真实 release 二进制、校验 Microsoft 签名、用 Inno Setup 打包，并在 `C:\code\Win-CodexBar-release\assets` 输出 GitHub Release 使用的四个资产。
@@ -107,11 +107,11 @@ Winget 分发已通过 [microsoft/winget-pkgs](https://github.com/microsoft/wing
 常用发布参数：
 
 ```powershell
-.\scripts\windows-release-build.ps1 -Ref v0.30.4 -WarmCacheOnly
-.\scripts\windows-release-build.ps1 -Ref v0.30.4 -WarmCliCache
-.\scripts\windows-release-build.ps1 -Ref v0.30.4 -SmokeInstall
-.\scripts\windows-release-build.ps1 -Ref v0.30.4 -UploadRelease v0.30.4
-.\scripts\release-doctor.ps1 -Version 0.30.4
+.\scripts\windows-release-build.ps1 -Ref v0.31.0 -WarmCacheOnly
+.\scripts\windows-release-build.ps1 -Ref v0.31.0 -WarmCliCache
+.\scripts\windows-release-build.ps1 -Ref v0.31.0 -SmokeInstall
+.\scripts\windows-release-build.ps1 -Ref v0.31.0 -UploadRelease v0.31.0
+.\scripts\release-doctor.ps1 -Version 0.31.0
 ```
 
 GitHub Actions 只作为辅助检查；安装包和便携版资产以 Windows 构建服务器脚本为主发布路径。

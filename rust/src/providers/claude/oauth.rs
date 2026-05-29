@@ -580,24 +580,14 @@ impl ClaudeOAuthFetcher {
             usage = usage.with_model_specific(sonnet);
         }
 
-        let extra_windows = [
-            (
-                "claude-design",
-                "Designs",
-                response
-                    .seven_day_design
-                    .as_ref()
-                    .and_then(|w| Self::to_rate_window(w, Some(10080))),
-            ),
-            (
-                "claude-routines",
-                "Daily Routines",
-                response
-                    .seven_day_routines
-                    .as_ref()
-                    .and_then(|w| Self::to_rate_window(w, Some(10080))),
-            ),
-        ];
+        let extra_windows = [(
+            "claude-routines",
+            "Daily Routines",
+            response
+                .seven_day_routines
+                .as_ref()
+                .and_then(|w| Self::to_rate_window(w, Some(10080))),
+        )];
         for (id, title, window) in extra_windows {
             if let Some(window) = window {
                 usage
@@ -722,7 +712,7 @@ mod tests {
 
         assert_eq!(usage.primary.used_percent, 100.0);
         assert!((usage.secondary.expect("weekly").used_percent - 14.0).abs() < 0.001);
-        assert_eq!(usage.extra_rate_windows[0].id, "claude-design");
+        assert!(usage.extra_rate_windows.is_empty());
     }
 
     #[test]

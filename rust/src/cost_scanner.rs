@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::core::{CostUsageDayRange, CostUsagePricing, JsonlScanner};
 
@@ -69,6 +70,10 @@ fn codex_speed_bucket(model: &str) -> &'static str {
     } else {
         "standard"
     }
+}
+
+fn is_cancelled(cancel: Option<&AtomicBool>) -> bool {
+    cancel.is_some_and(|flag| flag.load(Ordering::Relaxed))
 }
 
 /// Codex token pricing (per 1M tokens, as of 2024)
@@ -179,6 +184,11 @@ impl CostScanner {
 
     /// Scan Codex local logs
     pub fn scan_codex(&self) -> CostSummary {
+        self.scan_codex_with_cancel(None)
+    }
+
+    /// Scan Codex local logs, stopping early when the caller cancels the scan.
+    pub fn scan_codex_with_cancel(&self, cancel: Option<&AtomicBool>) -> CostSummary {
         let sessions_dir = self.get_codex_sessions_dir();
         if !sessions_dir.exists() {
             return CostSummary::default();
@@ -193,6 +203,9 @@ impl CostScanner {
 
         // Iterate through date-based directory structure
         for days_ago in 0..self.days {
+            if is_cancelled(cancel) {
+                break;
+            }
             let date = today - Duration::days(days_ago as i64);
             let year = date.format("%Y").to_string();
             let month = date.format("%m").to_string();
@@ -205,9 +218,12 @@ impl CostScanner {
 
             if let Ok(entries) = fs::read_dir(&day_dir) {
                 for entry in entries.flatten() {
+                    if is_cancelled(cancel) {
+                        break;
+                    }
                     let path = entry.path();
                     if path.extension().is_some_and(|e| e == "jsonl") {
-                        self.parse_codex_file(&path, &mut summary);
+                        self.parse_codex_file(&path, &mut summary, cancel);
                     }
                 }
             }
@@ -218,6 +234,11 @@ impl CostScanner {
 
     /// Scan Claude local logs
     pub fn scan_claude(&self) -> CostSummary {
+        self.scan_claude_with_cancel(None)
+    }
+
+    /// Scan Claude local logs, stopping early when the caller cancels the scan.
+    pub fn scan_claude_with_cancel(&self, cancel: Option<&AtomicBool>) -> CostSummary {
         let projects_dir = self.get_claude_projects_dir();
         if !projects_dir.exists() {
             return CostSummary::default();
@@ -232,7 +253,7 @@ impl CostScanner {
         summary.period_end = Some(today);
 
         // Walk through projects directory
-        self.scan_claude_dir(&projects_dir, &cutoff, &mut summary);
+        self.scan_claude_dir(&projects_dir, &cutoff, &mut summary, cancel);
 
         summary
     }
@@ -270,7 +291,15 @@ impl CostScanner {
         home.join(".config").join("claude").join("projects")
     }
 
-    fn parse_codex_file(&self, path: &PathBuf, summary: &mut CostSummary) {
+    fn parse_codex_file(
+        &self,
+        path: &PathBuf,
+        summary: &mut CostSummary,
+        cancel: Option<&AtomicBool>,
+    ) {
+        if is_cancelled(cancel) {
+            return;
+        }
         let today = Utc::now().date_naive();
         let start_date = today - Duration::days(self.days as i64);
         let range = CostUsageDayRange::new(start_date, today);
@@ -287,16 +316,28 @@ impl CostScanner {
         }
     }
 
-    fn scan_claude_dir(&self, dir: &PathBuf, cutoff: &DateTime<Utc>, summary: &mut CostSummary) {
+    fn scan_claude_dir(
+        &self,
+        dir: &PathBuf,
+        cutoff: &DateTime<Utc>,
+        summary: &mut CostSummary,
+        cancel: Option<&AtomicBool>,
+    ) {
+        if is_cancelled(cancel) {
+            return;
+        }
         let entries = match fs::read_dir(dir) {
             Ok(e) => e,
             Err(_) => return,
         };
 
         for entry in entries.flatten() {
+            if is_cancelled(cancel) {
+                break;
+            }
             let path = entry.path();
             if path.is_dir() {
-                self.scan_claude_dir(&path, cutoff, summary);
+                self.scan_claude_dir(&path, cutoff, summary, cancel);
             } else if path.extension().is_some_and(|e| e == "jsonl") {
                 // Check file modification time
                 if let Ok(metadata) = fs::metadata(&path)
@@ -304,14 +345,19 @@ impl CostScanner {
                 {
                     let modified_dt: DateTime<Utc> = modified.into();
                     if modified_dt >= *cutoff {
-                        self.parse_claude_file(&path, summary);
+                        self.parse_claude_file(&path, summary, cancel);
                     }
                 }
             }
         }
     }
 
-    fn parse_claude_file(&self, path: &PathBuf, summary: &mut CostSummary) {
+    fn parse_claude_file(
+        &self,
+        path: &PathBuf,
+        summary: &mut CostSummary,
+        cancel: Option<&AtomicBool>,
+    ) {
         let file = match File::open(path) {
             Ok(f) => f,
             Err(_) => return,
@@ -322,6 +368,9 @@ impl CostScanner {
         let mut has_tokens = false;
 
         for line in reader.lines().map_while(Result::ok) {
+            if is_cancelled(cancel) {
+                return;
+            }
             if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
                 // Look for assistant messages with usage
                 if event.get("type").and_then(|t| t.as_str()) == Some("assistant")
@@ -589,7 +638,7 @@ mod tests {
 
         let scanner = CostScanner::new(30);
         let mut summary = CostSummary::default();
-        scanner.parse_codex_file(&path, &mut summary);
+        scanner.parse_codex_file(&path, &mut summary, None);
 
         assert_eq!(summary.sessions_count, 1);
         assert_eq!(summary.input_tokens, 125);

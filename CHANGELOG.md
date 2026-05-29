@@ -4,6 +4,22 @@
 
 ---
 
+## [Windows] 0.31.0 - 2026-05-29
+
+### Added
+- Support AWS Bedrock usage through named AWS CLI profiles, including SSO, assume-role, and credential-process profiles that `aws configure export-credentials` can resolve.
+- Show Codex Spark 5-hour and weekly quota lanes from ChatGPT/Codex `additional_rate_limits` payloads.
+
+### Changed
+- Port upstream CodexBar 0.31.0 provider behavior into the Windows/Tauri Rust backend while keeping macOS-only AppKit menu and Homebrew changes out of the Windows shell.
+- Make local Codex/Claude chart scans cancellation-aware so repeated chart refreshes stop obsolete JSONL scans sooner.
+- Document Bedrock profile credentials in the provider settings help text.
+
+### Fixed
+- Hide Claude's obsolete Design quota lane while preserving the remaining OAuth apps and Daily Routines usage lanes.
+
+---
+
 ## [Windows] 0.30.4 - 2026-05-29
 
 ### Added
