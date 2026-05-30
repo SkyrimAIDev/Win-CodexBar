@@ -49,7 +49,7 @@ impl AntigravityProvider {
         cmd.args([
                 "-ExecutionPolicy", "Bypass",
                 "-Command",
-                "Get-CimInstance Win32_Process | Where-Object { $_.Name -like '*language_server_windows*' } | Select-Object -ExpandProperty CommandLine"
+                "Get-CimInstance Win32_Process | Where-Object { $_.Name -like '*language_server_windows*' } | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }"
             ]);
         #[cfg(windows)]
         cmd.creation_flags(CREATE_NO_WINDOW);
@@ -80,6 +80,13 @@ impl AntigravityProvider {
 
         for line in stdout.lines() {
             if line.contains("language_server_windows") && line.contains("--csrf_token") {
+                // Line is "<pid>\t<command line>"; split off the PID prefix we added so the
+                // PID can be used to enumerate the process's real listening ports below.
+                let (pid, line) = match line.split_once('\t') {
+                    Some((p, rest)) => (p.trim().parse::<u32>().ok(), rest),
+                    None => (None, line),
+                };
+
                 let csrf_token = csrf_regex
                     .captures(line)
                     .and_then(|c| c.get(1))
@@ -100,6 +107,7 @@ impl AntigravityProvider {
                         csrf_token: token,
                         extension_server_csrf_token: ext_csrf_token,
                         extension_port: p,
+                        pid,
                     });
                 }
             }
@@ -110,13 +118,18 @@ impl AntigravityProvider {
         ))
     }
 
-    /// Find the actual API port by checking listening ports
-    async fn find_api_port(extension_port: u16) -> Result<u16, ProviderError> {
-        // The language server listens on multiple ports near the extension port
-        // Try ports in range extension_port to extension_port + 20
-        // SECURITY: TLS verification is disabled because the local language server uses
-        // self-signed certificates. This is scoped to 127.0.0.1 only and the port range
-        // is limited. We verify the server responds with the expected gRPC endpoint.
+    /// Find the actual API port by probing the language server's candidate ports.
+    async fn find_api_port(extension_port: u16, pid: Option<u32>) -> Result<u16, ProviderError> {
+        // The language server binds a RANDOM localhost port at startup; --extension_server_port
+        // is only a reference point (and belongs to a separate HTTP extension server), so the
+        // real gRPC/Connect API port is not guaranteed to be within a small window above it.
+        // Mirror the macOS/Linux probe (which uses `lsof`) by enumerating the language-server
+        // process's own listening ports first, then fall back to a heuristic window above the
+        // extension port and a few historically-seen ports.
+        //
+        // SECURITY: TLS verification is disabled because the local language server uses a
+        // self-signed certificate. This is scoped to 127.0.0.1 only; we confirm a port by
+        // checking that it answers the expected gRPC endpoint.
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(2))
             .danger_accept_invalid_certs(true)
@@ -124,44 +137,23 @@ impl AntigravityProvider {
             .build()
             .map_err(|e| ProviderError::Other(e.to_string()))?;
 
-        for offset in 0..20 {
-            let port = extension_port + offset;
-            let url = format!(
-                "https://127.0.0.1:{}/exa.language_server_pb.LanguageServerService/GetUnleashData",
-                port
-            );
-
-            // Just check if the port responds (even with error)
-            if let Ok(resp) = client
-                .post(&url)
-                .header("Content-Type", "application/json")
-                .header("Connect-Protocol-Version", "1")
-                .body("{}")
-                .send()
-                .await
-            {
-                // If we get any response (even error), this is the API port
-                if resp.status().as_u16() == 200 || resp.status().as_u16() == 401 {
-                    return Ok(port);
-                }
-            }
+        // Ordered candidate ports: the process's real listening ports first (Windows
+        // equivalent of `lsof`), then the heuristic window above the extension port, then a
+        // few known ports as a last resort.
+        let mut candidates: Vec<u16> = Vec::new();
+        if let Some(pid) = pid {
+            candidates.extend(Self::listening_ports_for_pid(pid));
         }
+        candidates.extend((0..20u16).map(|offset| extension_port.saturating_add(offset)));
+        candidates.extend([53835, 53836, 53837, 53838, 53845, 53849]);
 
-        // Fallback: try common ports
-        for port in [53835, 53836, 53837, 53838, 53845, 53849] {
-            let url = format!(
-                "https://127.0.0.1:{}/exa.language_server_pb.LanguageServerService/GetUnleashData",
-                port
-            );
-            if let Ok(resp) = client
-                .post(&url)
-                .header("Content-Type", "application/json")
-                .header("Connect-Protocol-Version", "1")
-                .body("{}")
-                .send()
-                .await
-                && (resp.status().as_u16() == 200 || resp.status().as_u16() == 401)
-            {
+        let mut probed: Vec<u16> = Vec::new();
+        for port in candidates {
+            if probed.contains(&port) {
+                continue; // probe each port at most once
+            }
+            probed.push(port);
+            if Self::probe_api_port(&client, port).await {
                 return Ok(port);
             }
         }
@@ -171,10 +163,76 @@ impl AntigravityProvider {
         ))
     }
 
+    /// Probe a single candidate port. Returns true if it answers the language server's
+    /// gRPC endpoint (HTTP 200 or 401).
+    async fn probe_api_port(client: &reqwest::Client, port: u16) -> bool {
+        let url = format!(
+            "https://127.0.0.1:{}/exa.language_server_pb.LanguageServerService/GetUnleashData",
+            port
+        );
+        match client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("Connect-Protocol-Version", "1")
+            .body("{}")
+            .send()
+            .await
+        {
+            Ok(resp) => {
+                let code = resp.status().as_u16();
+                code == 200 || code == 401
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Enumerate the TCP ports a given PID is listening on (Windows `lsof` equivalent).
+    /// On Windows this uses `Get-NetTCPConnection`; it returns an empty list on any failure
+    /// so the caller deterministically falls back to the heuristic candidate ports.
+    #[cfg(windows)]
+    fn listening_ports_for_pid(pid: u32) -> Vec<u16> {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        let mut cmd = Command::new("powershell.exe");
+        cmd.args([
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &format!(
+                "Get-NetTCPConnection -OwningProcess {pid} -State Listen \
+                 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort"
+            ),
+        ]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        let Ok(output) = cmd.output() else {
+            return Vec::new();
+        };
+        if !output.status.success() {
+            return Vec::new();
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut ports: Vec<u16> = stdout
+            .lines()
+            .filter_map(|l| l.trim().parse::<u16>().ok())
+            .collect();
+        ports.sort_unstable();
+        ports.dedup();
+        ports
+    }
+
+    /// Non-Windows platforms have no `Get-NetTCPConnection`; return an empty list by design so
+    /// the caller falls back to the heuristic candidate ports.
+    #[cfg(not(windows))]
+    fn listening_ports_for_pid(_pid: u32) -> Vec<u16> {
+        Vec::new()
+    }
+
     /// Fetch user status from Antigravity API
     async fn fetch_user_status(&self) -> Result<UsageSnapshot, ProviderError> {
         let process_info = Self::detect_process_info()?;
-        let api_port = Self::find_api_port(process_info.extension_port).await?;
+        let api_port = Self::find_api_port(process_info.extension_port, process_info.pid).await?;
 
         // SECURITY: TLS verification disabled for local language server (see find_api_port)
         let client = reqwest::Client::builder()
@@ -379,6 +437,7 @@ struct ProcessInfo {
     csrf_token: String,
     extension_server_csrf_token: Option<String>,
     extension_port: u16,
+    pid: Option<u32>,
 }
 
 // API Response types
