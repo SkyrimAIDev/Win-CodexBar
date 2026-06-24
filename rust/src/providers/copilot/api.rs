@@ -4,7 +4,7 @@
 //! path is app-managed device OAuth/token accounts; legacy API key and Windows
 //! Credential Manager tokens remain supported as fallbacks.
 
-use crate::core::{ProviderError, RateWindow, UsageSnapshot};
+use crate::core::{NamedRateWindow, ProviderError, RateWindow, UsageSnapshot};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -286,7 +286,7 @@ fn snapshot_from_response(response: CopilotUsageResponse) -> Result<UsageSnapsho
         .quota_reset_date
         .as_deref()
         .and_then(parse_iso_date);
-    let quotas = response.usable_quotas();
+    let quotas = response.usable_quotas(reset);
 
     let primary_quota = quotas.premium.clone().or_else(|| quotas.first.clone());
     if primary_quota.is_none()
@@ -327,6 +327,8 @@ fn snapshot_from_response(response: CopilotUsageResponse) -> Result<UsageSnapsho
         );
     }
 
+    usage.extra_rate_windows.extend(quotas.extra);
+
     Ok(usage)
 }
 
@@ -342,6 +344,8 @@ enum CopilotQuotaKind {
 struct UsableQuota {
     kind: CopilotQuotaKind,
     percent_remaining: f64,
+    id: String,
+    title: String,
 }
 
 impl UsableQuota {
@@ -376,11 +380,15 @@ impl UsableQuota {
         Some(Self {
             kind,
             percent_remaining,
+            id: quota_id_or_key(quota_id, &key),
+            title: quota_title(quota_id, &key),
         })
     }
 
     fn from_limited(
         kind: CopilotQuotaKind,
+        id: &str,
+        title: &str,
         entitlement: Option<f64>,
         remaining: Option<f64>,
     ) -> Option<Self> {
@@ -393,6 +401,8 @@ impl UsableQuota {
         Some(Self {
             kind,
             percent_remaining: remaining / entitlement * 100.0,
+            id: id.to_string(),
+            title: title.to_string(),
         })
     }
 
@@ -414,10 +424,11 @@ struct UsableQuotas {
     chat: Option<UsableQuota>,
     completions: Option<UsableQuota>,
     first: Option<UsableQuota>,
+    extra: Vec<NamedRateWindow>,
 }
 
 impl CopilotUsageResponse {
-    fn usable_quotas(&self) -> UsableQuotas {
+    fn usable_quotas(&self, reset: Option<DateTime<Utc>>) -> UsableQuotas {
         let mut quotas = UsableQuotas::default();
 
         for (key, value) in &self.quota_snapshots.entries {
@@ -428,32 +439,45 @@ impl CopilotUsageResponse {
                 continue;
             };
 
-            if quotas.first.is_none() {
-                quotas.first = Some(quota.clone());
-            }
-
             match quota.kind {
                 CopilotQuotaKind::Premium => {
+                    if quotas.first.is_none() {
+                        quotas.first = Some(quota.clone());
+                    }
                     if quotas.premium.is_none() {
                         quotas.premium = Some(quota);
                     }
                 }
                 CopilotQuotaKind::Chat => {
+                    if quotas.first.is_none() {
+                        quotas.first = Some(quota.clone());
+                    }
                     if quotas.chat.is_none() {
                         quotas.chat = Some(quota);
                     }
                 }
                 CopilotQuotaKind::Completions => {
+                    if quotas.first.is_none() {
+                        quotas.first = Some(quota.clone());
+                    }
                     if quotas.completions.is_none() {
                         quotas.completions = Some(quota);
                     }
                 }
-                CopilotQuotaKind::Other => {}
+                CopilotQuotaKind::Other => {
+                    quotas.extra.push(NamedRateWindow::new(
+                        quota.id.clone(),
+                        quota.title.clone(),
+                        quota.to_rate_window(reset),
+                    ));
+                }
             }
         }
 
         let completions = UsableQuota::from_limited(
             CopilotQuotaKind::Completions,
+            "completions",
+            "Completions",
             self.monthly_quotas.completions,
             self.limited_user_quotas.completions,
         );
@@ -466,6 +490,8 @@ impl CopilotUsageResponse {
 
         let chat = UsableQuota::from_limited(
             CopilotQuotaKind::Chat,
+            "chat",
+            "Chat",
             self.monthly_quotas.chat,
             self.limited_user_quotas.chat,
         );
@@ -603,6 +629,35 @@ fn plan_label(plan: &str) -> String {
         "GitHub Copilot".to_string()
     } else {
         format!("Copilot {}", capitalize(plan))
+    }
+}
+
+fn quota_id_or_key(quota_id: &str, key: &str) -> String {
+    let raw = if quota_id.is_empty() { key } else { quota_id };
+    raw.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+
+fn quota_title(quota_id: &str, key: &str) -> String {
+    let raw = if quota_id.is_empty() { key } else { quota_id };
+    let words: Vec<String> = raw
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(capitalize)
+        .collect();
+    if words.is_empty() {
+        "Additional Budget".to_string()
+    } else {
+        words.join(" ")
     }
 }
 
@@ -804,6 +859,33 @@ mod tests {
         );
 
         assert!((usage.primary.used_percent - 100.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn keeps_additional_budget_as_extra_window() {
+        let usage = parse_snapshot(
+            r#"{
+                "copilot_plan": "pro",
+                "quota_snapshots": {
+                    "premium_interactions": {
+                        "entitlement": 500,
+                        "remaining": 250,
+                        "quota_id": "premium_interactions"
+                    },
+                    "additional_budget": {
+                        "entitlement": 100,
+                        "remaining": 25,
+                        "quota_id": "additional_budget"
+                    }
+                }
+            }"#,
+        );
+
+        assert!((usage.primary.used_percent - 50.0).abs() < 0.001);
+        assert_eq!(usage.extra_rate_windows.len(), 1);
+        assert_eq!(usage.extra_rate_windows[0].id, "additional-budget");
+        assert_eq!(usage.extra_rate_windows[0].title, "Additional Budget");
+        assert!((usage.extra_rate_windows[0].window.used_percent - 75.0).abs() < 0.001);
     }
 
     #[test]
