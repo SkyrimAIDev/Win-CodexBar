@@ -230,7 +230,7 @@ fn main() {
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(VISIBLE_START_ACTIVATION_DELAY).await;
                     if let Some(state) = app.try_state::<Mutex<AppState>>() {
-                        state.lock().unwrap().arm_startup_tray_blur_grace(
+                        state.lock().unwrap().arm_startup_tray_reveal(
                             std::time::Instant::now() + STARTUP_TRAY_BLUR_GRACE,
                         );
                     }
@@ -240,6 +240,7 @@ fn main() {
                         SurfaceTarget::Summary,
                         None,
                     );
+                    shell::schedule_startup_tray_panel_reveal_fallback(&app);
                 });
             }
 
