@@ -141,6 +141,10 @@ impl ClaudePricing {
             m if m.contains("sonnet-4-6") || m.contains("sonnet_4_6") => (3.00, 3.75, 0.30, 15.00),
             m if m.contains("opus") => (15.00, 18.75, 1.50, 75.00), // legacy Opus 3 / 4.0 / 4.1
             m if m.contains("sonnet") => (3.00, 3.75, 0.30, 15.00),
+            // Haiku 4.5 bills at $1/$5. The generic `haiku` arm below is the
+            // legacy Haiku 3 rate ($0.25/$1.25); match 4.5 explicitly so it is
+            // not under-priced by falling through to it.
+            m if m.contains("haiku-4-5") || m.contains("haiku_4_5") => (1.00, 1.25, 0.10, 5.00),
             m if m.contains("haiku") => (0.25, 0.30, 0.03, 1.25),
             _ => (3.00, 3.75, 0.30, 15.00), // Default to Sonnet
         };
@@ -731,6 +735,41 @@ mod tests {
                 "{model} should bill $90 ($15 in + $75 out), got {cost}"
             );
         }
+    }
+
+    #[test]
+    fn test_haiku_45_uses_current_pricing() {
+        // Haiku 4.5 bills at $1/1M input + $5/1M output = $6, not the legacy
+        // Haiku 3 rate of $0.25/$1.25 that the generic `haiku` arm applies.
+        let cost = ClaudePricing::cost_usd_with_cache_ttl(
+            "claude-haiku-4-5",
+            1_000_000,
+            0,
+            0,
+            0,
+            1_000_000,
+        );
+        assert!(
+            (cost - 6.00).abs() < 0.001,
+            "haiku-4-5 should bill $6 ($1 in + $5 out), got {cost}"
+        );
+    }
+
+    #[test]
+    fn test_legacy_haiku_keeps_legacy_pricing() {
+        // Haiku 3 remains at $0.25/1M input + $1.25/1M output = $1.50.
+        let cost = ClaudePricing::cost_usd_with_cache_ttl(
+            "claude-3-haiku-20240307",
+            1_000_000,
+            0,
+            0,
+            0,
+            1_000_000,
+        );
+        assert!(
+            (cost - 1.50).abs() < 0.001,
+            "haiku 3 should bill $1.50, got {cost}"
+        );
     }
 
     #[test]
