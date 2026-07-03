@@ -7,10 +7,10 @@ Win-CodexBar is a Windows system-tray app for keeping AI coding-tool usage visib
 <table>
   <tr>
     <td width="36%" align="center">
-      <img src="extra-docs/images/tray-panel.png" alt="Win-CodexBar tray panel showing provider usage cards"/>
+      <img src="docs/images/tray-panel.png" alt="Win-CodexBar tray panel showing provider usage cards"/>
     </td>
     <td width="64%" align="center">
-      <img src="extra-docs/images/settings-providers.png" alt="Win-CodexBar Providers settings page"/>
+      <img src="docs/images/settings-providers.png" alt="Win-CodexBar Providers settings page"/>
     </td>
   </tr>
 </table>
@@ -166,9 +166,9 @@ More release automation notes live in [docs/release/ci-cd.md](docs/release/ci-cd
 
 | Topic | Link |
 |---|---|
-| Building from source | [extra-docs/BUILDING.md](extra-docs/BUILDING.md) |
-| WSL setup and auth tips | [extra-docs/WSL.md](extra-docs/WSL.md) |
-| Browser cookie details | [extra-docs/COOKIES.md](extra-docs/COOKIES.md) |
+| Building from source | [docs/BUILDING.md](docs/BUILDING.md) |
+| WSL setup and auth tips | [docs/WSL.md](docs/WSL.md) |
+| Browser cookie details | [docs/COOKIES.md](docs/COOKIES.md) |
 
 ## Credits
 

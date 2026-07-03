@@ -7,10 +7,10 @@ Win-CodexBar es una aplicación de bandeja del sistema para Windows que mantiene
 <table>
   <tr>
     <td width="36%" align="center">
-      <img src="extra-docs/images/tray-panel.png" alt="Panel de bandeja de Win-CodexBar mostrando tarjetas de uso de proveedores"/>
+      <img src="docs/images/tray-panel.png" alt="Panel de bandeja de Win-CodexBar mostrando tarjetas de uso de proveedores"/>
     </td>
     <td width="64%" align="center">
-      <img src="extra-docs/images/settings-providers.png" alt="Página de configuración de Proveedores de Win-CodexBar"/>
+      <img src="docs/images/settings-providers.png" alt="Página de configuración de Proveedores de Win-CodexBar"/>
     </td>
   </tr>
 </table>
@@ -166,9 +166,9 @@ Más notas sobre automatización de versiones en [docs/release/ci-cd.md](docs/re
 
 | Tema | Enlace |
 |------|------|
-| Compilar desde el código fuente | [extra-docs/BUILDING.md](extra-docs/BUILDING.md) |
-| Configuración de WSL y consejos de autenticación | [extra-docs/WSL.md](extra-docs/WSL.md) |
-| Detalles de cookies del navegador | [extra-docs/COOKIES.md](extra-docs/COOKIES.md) |
+| Compilar desde el código fuente | [docs/BUILDING.md](docs/BUILDING.md) |
+| Configuración de WSL y consejos de autenticación | [docs/WSL.md](docs/WSL.md) |
+| Detalles de cookies del navegador | [docs/COOKIES.md](docs/COOKIES.md) |
 
 ## Créditos
 

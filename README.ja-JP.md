@@ -7,10 +7,10 @@ Win-CodexBar は、複数の AI コーディングツールの使用量を Windo
 <table>
   <tr>
     <td width="36%" align="center">
-      <img src="extra-docs/images/tray-panel.png" alt="プロバイダー使用量カードを表示する Win-CodexBar のトレイパネル"/>
+      <img src="docs/images/tray-panel.png" alt="プロバイダー使用量カードを表示する Win-CodexBar のトレイパネル"/>
     </td>
     <td width="64%" align="center">
-      <img src="extra-docs/images/settings-providers.png" alt="Win-CodexBar のプロバイダー設定画面"/>
+      <img src="docs/images/settings-providers.png" alt="Win-CodexBar のプロバイダー設定画面"/>
     </td>
   </tr>
 </table>
@@ -90,9 +90,9 @@ codexbar-cli cost -p codex
 
 | トピック | リンク |
 |---|---|
-| ソースからビルド | [extra-docs/BUILDING.md](extra-docs/BUILDING.md) |
-| WSL セットアップと認証 Tips | [extra-docs/WSL.md](extra-docs/WSL.md) |
-| ブラウザー Cookie の詳細 | [extra-docs/COOKIES.md](extra-docs/COOKIES.md) |
+| ソースからビルド | [docs/BUILDING.md](docs/BUILDING.md) |
+| WSL セットアップと認証 Tips | [docs/WSL.md](docs/WSL.md) |
+| ブラウザー Cookie の詳細 | [docs/COOKIES.md](docs/COOKIES.md) |
 
 ## クレジット
 

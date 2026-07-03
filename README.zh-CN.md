@@ -7,9 +7,9 @@
 > 基于 **Tauri + React** 构建，底层复用共享 **Rust** 后端。原版 CodexBar 是由 [Peter Steinberger](https://github.com/steipete) 开发的 macOS Swift 应用。
 
 <p align="center">
-  <img src="extra-docs/images/tray-panel.png" width="280" alt="托盘面板 — 服务商网格与 Codex 用量"/>
+  <img src="docs/images/tray-panel.png" width="280" alt="托盘面板 — 服务商网格与 Codex 用量"/>
   &nbsp;&nbsp;
-  <img src="extra-docs/images/settings-providers.png" width="480" alt="设置 — 服务商选项卡"/>
+  <img src="docs/images/settings-providers.png" width="480" alt="设置 — 服务商选项卡"/>
 </p>
 
 ## 功能特性
@@ -241,9 +241,9 @@ codexbar cost  -p codex           # 本地成本（JSONL 日志）
 
 | 主题 | 链接 |
 |------|------|
-| 从源码构建 | [extra-docs/BUILDING.md](extra-docs/BUILDING.md) |
-| WSL 设置与认证 | [extra-docs/WSL.md](extra-docs/WSL.md) |
-| 浏览器 Cookie 详解 | [extra-docs/COOKIES.md](extra-docs/COOKIES.md) |
+| 从源码构建 | [docs/BUILDING.md](docs/BUILDING.md) |
+| WSL 设置与认证 | [docs/WSL.md](docs/WSL.md) |
+| 浏览器 Cookie 详解 | [docs/COOKIES.md](docs/COOKIES.md) |
 
 ## 致谢
 

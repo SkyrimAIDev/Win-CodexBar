@@ -7,10 +7,10 @@ Win-CodexBar는 여러 AI 코딩 도구의 사용량을 Windows 시스템 트레
 <table>
   <tr>
     <td width="36%" align="center">
-      <img src="extra-docs/images/tray-panel.png" alt="프로바이더 사용량 카드를 보여 주는 Win-CodexBar 트레이 패널"/>
+      <img src="docs/images/tray-panel.png" alt="프로바이더 사용량 카드를 보여 주는 Win-CodexBar 트레이 패널"/>
     </td>
     <td width="64%" align="center">
-      <img src="extra-docs/images/settings-providers.png" alt="Win-CodexBar 프로바이더 설정 화면"/>
+      <img src="docs/images/settings-providers.png" alt="Win-CodexBar 프로바이더 설정 화면"/>
     </td>
   </tr>
 </table>
@@ -90,9 +90,9 @@ codexbar-cli cost -p codex
 
 | 주제 | 링크 |
 |---|---|
-| 소스에서 빌드 | [extra-docs/BUILDING.md](extra-docs/BUILDING.md) |
-| WSL 설정과 인증 팁 | [extra-docs/WSL.md](extra-docs/WSL.md) |
-| 브라우저 쿠키 상세 | [extra-docs/COOKIES.md](extra-docs/COOKIES.md) |
+| 소스에서 빌드 | [docs/BUILDING.md](docs/BUILDING.md) |
+| WSL 설정과 인증 팁 | [docs/WSL.md](docs/WSL.md) |
+| 브라우저 쿠키 상세 | [docs/COOKIES.md](docs/COOKIES.md) |
 
 ## 크레딧
 

@@ -111,7 +111,7 @@ Win-CodexBar/
 │       ├── browser/             # Browser cookie extraction (DPAPI)
 │       ├── tray/                # Tray icon rendering
 │       └── main.rs              # CLI entry point
-├── extra-docs/                  # Additional documentation
+├── docs/                        # Documentation
 ├── dev.ps1                      # Windows dev launcher
 └── dev.sh                       # WSL/Linux dev launcher
 ```
