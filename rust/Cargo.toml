@@ -109,12 +109,8 @@ tokio-test = "0.4"
 tempfile = "3"
 mockito = "1.4"
 
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-strip = true
-panic = "abort"
+# NB: release profile lives at the workspace root (../Cargo.toml). Cargo ignores
+# `[profile.*]` in non-root member crates, so defining it here had no effect.
 
 [[bin]]
 name = "codexbar"
