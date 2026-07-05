@@ -168,10 +168,16 @@ async fn do_refresh_providers_with_policy(
 
     events::emit_refresh_started(app);
 
-    let inputs = ProviderRefreshInputs::load();
+    // Read settings/cookies/keys/token-accounts off the async runtime so the
+    // blocking file I/O does not occupy a runtime worker.
+    let inputs = Arc::new(
+        tokio::task::spawn_blocking(ProviderRefreshInputs::load)
+            .await
+            .map_err(|e| format!("failed to load provider refresh inputs: {e}"))?,
+    );
     let enabled_count = inputs.enabled_ids.len();
 
-    let handles = spawn_provider_refreshes(app, &inputs);
+    let handles = spawn_provider_refreshes(app, Arc::clone(&inputs));
     await_provider_refreshes(handles).await;
 
     let error_count = finish_provider_refresh(&state)?;
@@ -216,7 +222,7 @@ fn begin_provider_refresh<'a>(
     guard.is_refreshing = true;
     guard.provider_refresh_started_at = Some(std::time::Instant::now());
     drop(guard);
-    Ok(Some(RefreshGuard { state: &**state }))
+    Ok(Some(RefreshGuard { state }))
 }
 
 fn provider_cache_can_skip_refresh(guard: &AppState, force: bool) -> bool {
@@ -256,26 +262,39 @@ impl ProviderRefreshInputs {
 
 fn spawn_provider_refreshes(
     app: &tauri::AppHandle,
-    inputs: &ProviderRefreshInputs,
+    inputs: Arc<ProviderRefreshInputs>,
 ) -> Vec<tokio::task::JoinHandle<()>> {
     let mut handles = Vec::with_capacity(inputs.enabled_ids.len());
     let fetch_permits = Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PROVIDER_FETCHES));
 
-    for id in &inputs.enabled_ids {
-        let id = *id;
+    for id in inputs.enabled_ids.clone() {
         let app_handle = app.clone();
         let fetch_permits = Arc::clone(&fetch_permits);
-        let ctx = build_fetch_context(
-            id,
-            &inputs.settings,
-            &inputs.manual_cookies,
-            &inputs.api_keys,
-            &inputs.token_accounts,
-        );
+        let inputs = Arc::clone(&inputs);
 
         handles.push(tokio::spawn(async move {
             let Ok(_permit) = fetch_permits.acquire_owned().await else {
                 return;
+            };
+            // Build the fetch context (settings lookups + synchronous browser
+            // cookie extraction: SQLite + DPAPI) on a blocking thread, bounded
+            // by the fetch permit, so it does not occupy a runtime worker.
+            let ctx = match tokio::task::spawn_blocking(move || {
+                build_fetch_context(
+                    id,
+                    &inputs.settings,
+                    &inputs.manual_cookies,
+                    &inputs.api_keys,
+                    &inputs.token_accounts,
+                )
+            })
+            .await
+            {
+                Ok(ctx) => ctx,
+                Err(error) => {
+                    tracing::warn!("build_fetch_context task failed for {}: {error}", id.cli_name());
+                    return;
+                }
             };
             refresh_provider(app_handle, id, ctx).await;
         }));
