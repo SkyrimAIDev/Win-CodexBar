@@ -422,43 +422,12 @@ impl CookieExtractor {
 
             tracing::debug!("Decrypted {} bytes successfully", plaintext.len(),);
 
-            // Some Chromium versions prepend metadata bytes before the actual
-            // cookie value in the AES-GCM plaintext.  If the leading bytes look
-            // non-ASCII, skip up to a 32-byte internal header to find the start
-            // of the cookie string.  This is distinct from App-Bound Encryption
-            // (ABE): ABE failures are caught upstream as AES-GCM authentication
-            // errors and never reach this point.
-            let value_bytes = if plaintext.len() > 32 {
-                // Check if first 32 bytes are garbage (non-ASCII)
-                let has_garbage_prefix = plaintext[..32].iter().any(|&b| !(32..=127).contains(&b));
-                if has_garbage_prefix {
-                    // Find where ASCII text starts (skip prefix)
-                    let start = plaintext
-                        .iter()
-                        .position(|&b| {
-                            // Look for common cookie value start chars
-                            b.is_ascii_alphanumeric() || b == b'"' || b == b'{'
-                        })
-                        .unwrap_or(0);
-
-                    // But use a minimum of 32 bytes prefix for App-Bound Encryption
-                    let actual_start = if start < 32 && plaintext.len() > 32 {
-                        32
-                    } else {
-                        start
-                    };
-
-                    tracing::debug!(
-                        "Skipping {} byte prefix (App-Bound Encryption)",
-                        actual_start
-                    );
-                    &plaintext[actual_start..]
-                } else {
-                    &plaintext[..]
-                }
-            } else {
-                &plaintext[..]
-            };
+            // Newer Chromium prepends a 32-byte binary hash (derived from the
+            // cookie's host) to the AES-GCM plaintext to bind the cookie to its
+            // domain. Strip that prefix when present. (Distinct from App-Bound
+            // Encryption, whose failures are caught upstream as AES-GCM auth
+            // errors and never reach this point.)
+            let value_bytes = strip_domain_hash_prefix(&plaintext);
 
             String::from_utf8(value_bytes.to_vec()).map_err(|e| {
                 tracing::debug!("UTF-8 conversion failed after prefix strip: {}", e);
@@ -630,6 +599,35 @@ impl Drop for TempDbFile {
     }
 }
 
+/// Strip the 32-byte domain-binding hash that newer Chromium prepends to a
+/// decrypted cookie value.
+///
+/// Detection is by byte distribution, not "contains any non-printable byte": a
+/// 32-byte binary hash is mostly non-printable (~20 of 32), whereas a real
+/// cookie value is ASCII text (base64/JSON/token) with essentially no
+/// non-printable bytes. Requiring the 32-byte window to be predominantly
+/// non-printable means a legitimate value that merely contains a stray control
+/// byte is no longer truncated (the previous heuristic corrupted such values),
+/// and exactly 32 bytes are removed — never a fuzzy, variable amount.
+fn strip_domain_hash_prefix(plaintext: &[u8]) -> &[u8] {
+    const PREFIX_LEN: usize = 32;
+    // Must leave a value after the prefix.
+    if plaintext.len() <= PREFIX_LEN {
+        return plaintext;
+    }
+    let non_printable = plaintext[..PREFIX_LEN]
+        .iter()
+        .filter(|&&b| !(0x20..=0x7e).contains(&b))
+        .count();
+    // A binary hash carries ~20 non-printable bytes; ASCII text carries ~0.
+    // The gap is wide, so an 8-byte threshold separates them with huge margin.
+    if non_printable >= 8 {
+        &plaintext[PREFIX_LEN..]
+    } else {
+        plaintext
+    }
+}
+
 fn domain_matches(host_key: &str, domain: &str) -> bool {
     let host = host_key.trim().trim_end_matches('.').to_ascii_lowercase();
     let domain = domain
@@ -739,6 +737,28 @@ pub fn get_cookie_header_from_browser(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strip_domain_hash_prefix_removes_binary_prefix() {
+        // 32 non-printable bytes (0x00..0x1f) look like a binary hash prefix.
+        let mut blob: Vec<u8> = (0u8..32).collect();
+        blob.extend_from_slice(b"session=abc123");
+        assert_eq!(strip_domain_hash_prefix(&blob), b"session=abc123");
+    }
+
+    #[test]
+    fn strip_domain_hash_prefix_keeps_ascii_value_with_stray_control_byte() {
+        // A legit >32-byte ASCII value with a single control byte in the first
+        // 32 bytes must NOT be truncated (the old heuristic corrupted this).
+        let mut value = b"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig".to_vec();
+        value[5] = 0x01;
+        assert_eq!(strip_domain_hash_prefix(&value), &value[..]);
+    }
+
+    #[test]
+    fn strip_domain_hash_prefix_leaves_short_plaintext_untouched() {
+        assert_eq!(strip_domain_hash_prefix(b"short-value"), b"short-value");
+    }
 
     #[test]
     fn domain_matching_requires_boundary() {
