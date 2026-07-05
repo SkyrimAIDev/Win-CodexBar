@@ -278,16 +278,19 @@ impl CredentialMigrator {
             .map_err(|e| MigrationError::DeleteFailed(e.to_string()))
     }
 
-    /// Get the current migration version from settings
+    /// Get the current migration version.
+    ///
+    /// STUB: always returns 0 (so `needs_migration` is always true) because no
+    /// persistence backend is wired up yet. This whole migrator is currently
+    /// unwired (`migrate_if_needed` has no callers); before wiring it in,
+    /// persist the version to settings/registry here and read it back, so a
+    /// completed migration is detected and not re-run.
     fn get_migration_version(&self) -> u32 {
-        // Use the settings file or registry to track migration version
-        // For now, we'll use a simple approach with settings
-        0 // Default to 0 (no migration done)
+        0
     }
 
-    /// Set the migration version in settings
+    /// Set the migration version. STUB: see [`Self::get_migration_version`].
     fn set_migration_version(&self, _version: u32) {
-        // Store in settings file
         tracing::debug!("Migration version set to {}", CURRENT_MIGRATION_VERSION);
     }
 
@@ -356,12 +359,18 @@ const PROVIDER_ACCOUNT_NAMES: &[(ProviderId, &str)] = &[
     (ProviderId::LLMProxy, "llmproxy-api-token"),
 ];
 
-/// Get the account name for a provider's credentials
+/// Get the account name for a provider's credentials.
+///
+/// Falls back to the provider's stable `cli_name` for any provider not listed
+/// in `PROVIDER_ACCOUNT_NAMES` (several newer providers are not), so this is
+/// total over every `ProviderId` and can never panic — the previous `.expect`
+/// would have crashed for an uncovered provider if migration were ever wired
+/// up. The fallback is still a unique, stable per-provider name.
 pub fn account_name_for_provider(provider: ProviderId) -> &'static str {
     PROVIDER_ACCOUNT_NAMES
         .iter()
         .find_map(|(id, account)| (*id == provider).then_some(*account))
-        .expect("provider account name table must cover every ProviderId")
+        .unwrap_or_else(|| provider.cli_name())
 }
 
 /// Migrate credentials for a specific provider from one format to another
@@ -382,6 +391,19 @@ pub fn migrate_provider_credential(
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn account_name_is_total_and_unique_over_all_providers() {
+        let mut seen = HashSet::new();
+        for id in ProviderId::all() {
+            let name = account_name_for_provider(*id);
+            assert!(!name.is_empty(), "empty account name for {id:?}");
+            assert!(
+                seen.insert(name),
+                "duplicate account name {name:?} (collides for {id:?})"
+            );
+        }
+    }
 
     #[test]
     fn test_migration_item_label() {
