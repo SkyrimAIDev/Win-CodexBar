@@ -13,7 +13,7 @@ const AUTO_REFRESH_POLL_INTERVAL: Duration = Duration::from_secs(15);
 pub fn install(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         loop {
-            if should_refresh(&app) {
+            if should_refresh(&app).await {
                 let _ = crate::commands::do_refresh_providers_if_stale(&app).await;
             }
             tokio::time::sleep(AUTO_REFRESH_POLL_INTERVAL).await;
@@ -21,8 +21,16 @@ pub fn install(app: tauri::AppHandle) {
     });
 }
 
-fn should_refresh(app: &tauri::AppHandle) -> bool {
-    let settings = Settings::load();
+async fn should_refresh(app: &tauri::AppHandle) -> bool {
+    // Read settings off the runtime so the periodic disk read never occupies a
+    // worker thread.
+    let settings = match tokio::task::spawn_blocking(Settings::load).await {
+        Ok(settings) => settings,
+        Err(error) => {
+            tracing::debug!("auto-refresh settings load failed: {error}");
+            return false;
+        }
+    };
     let Some(interval) = refresh_interval(settings.refresh_interval_secs) else {
         return false;
     };
