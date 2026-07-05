@@ -5,3 +5,18 @@ members = [
 ]
 default-members = ["apps/desktop-tauri/src-tauri"]
 resolver = "3"
+
+# Applied at the workspace root so it governs BOTH the `codexbar` CLI and the
+# `codexbar-desktop-tauri` app. A `[profile.release]` in a member crate
+# (e.g. rust/Cargo.toml) is silently ignored by Cargo, so these optimizations
+# were previously never applied to the shipped release binaries.
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+# Intentionally NOT `panic = "abort"`: `panic` must be uniform across the
+# workspace, and the desktop app relies on the Tokio runtime isolating a
+# panicking spawned task (a provider fetch, a tray/event callback) rather than
+# aborting the whole process. Unwind is the safer default for a long-running
+# tray GUI, so it is kept for both binaries.
