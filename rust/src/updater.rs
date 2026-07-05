@@ -116,6 +116,9 @@ fn release_url(channel: UpdateChannel) -> String {
 fn update_client() -> Option<reqwest::Client> {
     reqwest::Client::builder()
         .user_agent("CodexBar")
+        // Refuse to follow a spoofed `http://` release/download URL: TLS
+        // certificate validation only protects requests that actually use TLS.
+        .https_only(true)
         .build()
         .ok()
 }
@@ -305,6 +308,7 @@ fn expected_update_sha256(update_info: &UpdateInfo) -> Result<&str, String> {
 fn update_http_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .user_agent("CodexBar")
+        .https_only(true)
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))
 }
@@ -479,13 +483,21 @@ pub fn apply_update(installer_path: &PathBuf) -> Result<(), String> {
     }
 
     #[cfg(target_os = "windows")]
-    spawn_windows_installer(
-        installer_path,
-        &windows_update_relaunch_path(
-            &std::env::current_exe()
-                .map_err(|e| format!("Failed to determine current executable for restart: {e}"))?,
-        ),
-    )?;
+    {
+        // Integrity gate before we execute the downloaded installer. The SHA-256
+        // digest alone shares a trust root with the artifact (both come from the
+        // same GitHub release response), so also require a valid Authenticode
+        // signature from the expected publisher when signing is configured.
+        verify_installer_signature(installer_path)?;
+        spawn_windows_installer(
+            installer_path,
+            &windows_update_relaunch_path(
+                &std::env::current_exe().map_err(|e| {
+                    format!("Failed to determine current executable for restart: {e}")
+                })?,
+            ),
+        )?;
+    }
 
     #[cfg(not(target_os = "windows"))]
     {
@@ -623,6 +635,94 @@ fn windows_powershell_path() -> PathBuf {
         })
         .filter(|path| path.exists())
         .unwrap_or_else(|| PathBuf::from("powershell.exe"))
+}
+
+/// Authenticode publisher (certificate subject substring) that release
+/// installers must be signed by. Return `Some("...")` once release artifacts
+/// are code-signed to enforce publisher-pinned verification before an update
+/// is launched. While `None`, installers are unsigned and signature checking
+/// is skipped with a warning, so integrity still rests on the SHA-256 digest.
+#[cfg(target_os = "windows")]
+fn expected_installer_publisher() -> Option<&'static str> {
+    None
+}
+
+/// Require the downloaded installer to carry a valid Authenticode signature
+/// from [`expected_installer_publisher`] before it is executed.
+///
+/// Closes the gap where the only integrity gate was a SHA-256 digest served by
+/// the same GitHub API response as the download URL — an attacker able to forge
+/// that response (or publish a malicious release) controls both the binary and
+/// its advertised hash. Returns `Ok(())` with a warning while no publisher is
+/// configured, so unsigned releases keep updating until signing is in place.
+#[cfg(target_os = "windows")]
+fn verify_installer_signature(installer_path: &Path) -> Result<(), String> {
+    let expected_publisher = match expected_installer_publisher() {
+        Some(publisher) => publisher,
+        None => {
+            tracing::warn!(
+                "Installer Authenticode verification is not enforced (no expected publisher configured); relying on the SHA-256 digest only"
+            );
+            return Ok(());
+        }
+    };
+
+    // Ask PowerShell for the signature status and signer subject. `OK:<subject>`
+    // is emitted only for a `Valid` signature; anything else is `INVALID:<status>`.
+    let script = format!(
+        "$ErrorActionPreference='Stop'; \
+         $sig = Get-AuthenticodeSignature -LiteralPath {}; \
+         if ($sig.Status -eq 'Valid') {{ Write-Output ('OK:' + $sig.SignerCertificate.Subject) }} \
+         else {{ Write-Output ('INVALID:' + $sig.Status) }}",
+        powershell_single_quoted(&installer_path.to_string_lossy()),
+    );
+
+    let output = std::process::Command::new(windows_powershell_path())
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run installer signature verification: {e}"))?;
+
+    if !output.status.success() {
+        return Err("Installer signature verification failed to run".to_string());
+    }
+
+    interpret_signature_output(&String::from_utf8_lossy(&output.stdout), expected_publisher)
+}
+
+/// Parse the `Get-AuthenticodeSignature` probe output (see
+/// [`verify_installer_signature`]). Split out so the accept/reject logic is
+/// unit-testable without spawning PowerShell.
+#[cfg(target_os = "windows")]
+fn interpret_signature_output(stdout: &str, expected_publisher: &str) -> Result<(), String> {
+    let line = stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default();
+
+    if let Some(subject) = line.strip_prefix("OK:") {
+        if subject
+            .to_ascii_lowercase()
+            .contains(&expected_publisher.to_ascii_lowercase())
+        {
+            tracing::info!("Installer Authenticode signature verified: {subject}");
+            Ok(())
+        } else {
+            Err(format!(
+                "Installer is signed by an unexpected publisher: {subject}"
+            ))
+        }
+    } else if let Some(status) = line.strip_prefix("INVALID:") {
+        Err(format!("Installer is not validly signed (status: {status})"))
+    } else {
+        Err("Installer signature verification returned no result".to_string())
+    }
 }
 
 /// Check if there's a pending update ready to install
@@ -906,5 +1006,29 @@ mod tests {
             powershell_single_quoted(r"C:\Temp\CodexBar's Setup.exe"),
             r"'C:\Temp\CodexBar''s Setup.exe'"
         );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn signature_output_accepts_expected_publisher() {
+        assert!(
+            interpret_signature_output("OK:CN=Finesssee, O=Finesssee, C=US\n", "Finesssee").is_ok()
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn signature_output_rejects_wrong_publisher_invalid_and_empty() {
+        assert!(
+            interpret_signature_output("OK:CN=Somebody Else\n", "Finesssee")
+                .unwrap_err()
+                .contains("unexpected publisher")
+        );
+        assert!(
+            interpret_signature_output("INVALID:NotSigned\n", "Finesssee")
+                .unwrap_err()
+                .contains("not validly signed")
+        );
+        assert!(interpret_signature_output("", "Finesssee").is_err());
     }
 }
