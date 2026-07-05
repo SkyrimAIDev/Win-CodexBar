@@ -1,5 +1,26 @@
 # Changelog
 
+## [Windows] 0.38.3 - 2026-07-05
+
+### Security
+- Reject UNC/network and reparse-point (junction/symlink) targets in the open-path command before the filesystem probe, closing an SMB forced-authentication / NTLM-hash-theft vector.
+- Resolve provider CLIs (grok, gh, aws) via PATH and system binaries (PowerShell, `where`) via absolute System32 paths, hardening against current-working-directory binary hijacking.
+- Updater now enforces HTTPS-only downloads and verifies the installer's Authenticode certificate thumbprint before launch (enabled once release signing is configured).
+- Warn on machine-scope DPAPI fallback and restrict secret-file ACLs to the current user; write secrets and settings atomically to prevent credential loss on a torn or concurrent write.
+- Add optional Authenticode signing to the Windows release build.
+
+### Fixed
+- Fix crashes on unexpected inputs: an unexpected HTTP status from Infini, and non-ASCII slicing in the Sakana/Ollama billing scrapers and `account list` token masking.
+- Bound provider fetches in the `usage` command and `serve` daemon with timeouts and bounded concurrency; add a request read-timeout, connection cap, and a working `--refresh-interval` response cache to `serve`.
+- Guard the refresh flag so a cancelled refresh can no longer leave it stuck; run startup shell transitions on the main thread to remove a potential window/tray deadlock.
+- Stop the cookie-decryption prefix heuristic from corrupting valid values, and always clean up the temporary cookie-DB copy.
+
+### Changed
+- Move the release build profile to the workspace root so LTO/strip/opt settings actually apply to shipped binaries (kept unwind for GUI task isolation).
+- Offload blocking settings/cookie I/O during refresh to blocking threads so it no longer occupies async runtime workers.
+
+---
+
 ## [Windows] 0.38.2 - 2026-07-05
 
 ### Fixed
