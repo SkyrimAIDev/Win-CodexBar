@@ -6,6 +6,8 @@ param(
 
     [string]$InstallDir = "$env:LOCALAPPDATA\Programs\CodexBar",
 
+    [switch]$RequireSignature,
+
     [switch]$LeaveInstalled
 )
 
@@ -45,6 +47,8 @@ Write-Step "installer sha256: $installerHash"
 $signature = Get-AuthenticodeSignature -FilePath $installer
 if ($signature.Status -eq "Valid") {
     Write-Step "installer signature: valid ($($signature.SignerCertificate.Subject))"
+} elseif ($RequireSignature) {
+    throw "installer signature is not valid (status: $($signature.Status)) and -RequireSignature was set"
 } else {
     Write-Step "installer signature: $($signature.Status)"
 }

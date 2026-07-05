@@ -56,6 +56,12 @@ param(
     [switch]$WarmCacheOnly,
     [switch]$WarmCliCache,
     [switch]$SmokeInstall,
+    [string]$SignToolPath = "",
+    [string]$SigningCertPath = "",
+    [string]$SigningCertPassword = "",
+    [string]$SigningCertThumbprint = "",
+    [string]$SigningTimestampUrl = "http://timestamp.digicert.com",
+    [switch]$RequireSignature,
     [string]$UploadRelease = ""
 )
 
@@ -129,6 +135,90 @@ function Assert-MicrosoftSignature {
     $subject = $signature.SignerCertificate.Subject
     if ($subject -notlike "*Microsoft Corporation*") {
         throw "$Path signer is unexpected: $subject"
+    }
+}
+
+function Test-SigningConfigured {
+    return [bool]($SigningCertPath -or $SigningCertThumbprint)
+}
+
+function Get-SignTool {
+    if ($SignToolPath) {
+        if (-not (Test-Path $SignToolPath)) {
+            throw "signtool not found at -SignToolPath: $SignToolPath"
+        }
+        return $SignToolPath
+    }
+
+    $command = Get-Command "signtool.exe" -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+
+    $kitRoots = @(
+        (Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"),
+        (Join-Path $env:ProgramFiles "Windows Kits\10\bin")
+    ) | Where-Object { $_ -and (Test-Path $_) }
+
+    foreach ($root in $kitRoots) {
+        $candidate = Get-ChildItem -Path $root -Recurse -Filter "signtool.exe" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\x64\\" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+        if ($candidate) {
+            return $candidate.FullName
+        }
+    }
+
+    throw "signtool.exe not found. Install the Windows SDK or pass -SignToolPath."
+}
+
+function Assert-AuthenticodeValid {
+    param([string]$Path)
+
+    $signature = Get-AuthenticodeSignature -FilePath $Path
+    if ($signature.Status -ne "Valid") {
+        throw "Authenticode verification failed for ${Path}: $($signature.Status)"
+    }
+}
+
+function Invoke-SignArtifacts {
+    param([string[]]$Paths)
+
+    if (-not (Test-SigningConfigured)) {
+        if ($RequireSignature) {
+            throw "Signing was required (-RequireSignature) but no signing certificate was provided (-SigningCertPath or -SigningCertThumbprint)."
+        }
+        Write-Host "WARNING: no signing certificate provided; release artifacts will be UNSIGNED. Pass -SigningCertPath or -SigningCertThumbprint (with -RequireSignature) to Authenticode-sign them."
+        return
+    }
+
+    $signtool = Get-SignTool
+    $signArgs = @("sign", "/fd", "sha256", "/tr", $SigningTimestampUrl, "/td", "sha256")
+
+    if ($SigningCertThumbprint) {
+        $signArgs += @("/sha1", $SigningCertThumbprint)
+    } else {
+        if (-not (Test-Path $SigningCertPath)) {
+            throw "Signing certificate not found: $SigningCertPath"
+        }
+        $signArgs += @("/f", $SigningCertPath)
+        $password = $SigningCertPassword
+        if (-not $password) {
+            $password = [Environment]::GetEnvironmentVariable("CODEXBAR_SIGNING_CERT_PASSWORD")
+        }
+        if ($password) {
+            $signArgs += @("/p", $password)
+        }
+    }
+
+    foreach ($path in $Paths) {
+        if (-not (Test-Path $path)) {
+            throw "Cannot sign missing artifact: $path"
+        }
+        Write-Host "Signing $path"
+        Invoke-Native $signtool ($signArgs + @($path))
+        Assert-AuthenticodeValid -Path $path
     }
 }
 
@@ -386,6 +476,11 @@ try {
     Assert-MicrosoftSignature -Path $vcRedistPath
     Assert-MicrosoftSignature -Path $webView2BootstrapperPath
 
+    # Authenticode-sign the executables before Inno bundles them so the
+    # installed binaries (and the portable copy) are signed. The installer
+    # itself is signed after packaging, below.
+    Invoke-SignArtifacts @($desktopExe, $legacyDesktopExe, $releaseExe)
+
     $iscc = Get-InnoSetupCompiler
 
     $installerOut = Join-Path $CacheDir "installer"
@@ -417,6 +512,10 @@ try {
         }
     }
 
+    # Sign the packaged installer before it is copied to the assets dir and
+    # hashed, so the published SHA-256 sidecars cover the signed artifacts.
+    Invoke-SignArtifacts @($installer)
+
     Copy-Item $desktopExe $portableExe -Force
     Copy-Item $installer $installerAsset -Force
 
@@ -431,7 +530,7 @@ try {
         if (-not (Test-Path $smokeScript)) {
             throw "Smoke install script not found: $smokeScript"
         }
-        & $smokeScript -InstallerPath $installerAsset -ExpectedVersion $version
+        & $smokeScript -InstallerPath $installerAsset -ExpectedVersion $version -RequireSignature:$RequireSignature
         if ($LASTEXITCODE -ne 0) {
             throw "Smoke install failed with exit code $LASTEXITCODE"
         }
