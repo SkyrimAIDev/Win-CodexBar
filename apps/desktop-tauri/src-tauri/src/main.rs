@@ -233,19 +233,34 @@ fn main() {
                 let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(PROOF_ACTIVATION_DELAY).await;
-                    proof_harness::activate(&app_handle);
+                    // Run the proof transition on the main thread (see the
+                    // primary-window branch below for why).
+                    let app_for_main = app_handle.clone();
+                    let _ = app_handle.run_on_main_thread(move || {
+                        proof_harness::activate(&app_for_main);
+                    });
                 });
             } else if launch.open_primary_window_at_start {
                 let app = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(VISIBLE_START_ACTIVATION_DELAY).await;
                     let request = primary_window_request();
-                    let _ = shell::reopen_to_target(
-                        &app,
-                        request.mode,
-                        request.target,
-                        request.position,
-                    );
+                    // Run the shell transition on the main thread. It acquires
+                    // SHELL_TRANSITION_SERIAL and performs window operations, and
+                    // that lock is otherwise only ever taken on the main thread
+                    // (window events, tray, shortcuts). Holding it from this
+                    // worker while a main-thread transition waits on it would
+                    // deadlock; `run_on_main_thread` posts the work and returns,
+                    // so the worker never holds the lock.
+                    let app_for_main = app.clone();
+                    let _ = app.run_on_main_thread(move || {
+                        let _ = shell::reopen_to_target(
+                            &app_for_main,
+                            request.mode,
+                            request.target,
+                            request.position,
+                        );
+                    });
                 });
             }
 
